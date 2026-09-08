@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import base64
-import math
-import os
 import shutil
 import subprocess
 import tempfile
@@ -11,9 +9,13 @@ from typing import List, Dict, Any
 
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from basic_pitch.inference import predict
 
-app = FastAPI(title="YouTube Music Notes Transcription Server")
+from music_document import build_music_document
+from reasoning import reason_about_music
+
+app = FastAPI(title="YouTube Music Notes API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -22,7 +24,13 @@ app.add_middleware(
 )
 
 NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-GUITAR_OPEN = [40, 45, 50, 55, 59, 64]  # low E to high E, MIDI
+GUITAR_OPEN = [40, 45, 50, 55, 59, 64]
+
+
+class ReasonRequest(BaseModel):
+    music_document: Dict[str, Any]
+    question: str
+    provider: str | None = None
 
 
 def midi_name(midi: int) -> str:
@@ -101,7 +109,12 @@ def try_guitar_stem(wav_path: Path, workdir: Path) -> Path:
 
 @app.get("/health")
 def health():
-    return {"ok": True, "ffmpeg": bool(shutil.which("ffmpeg")), "demucs": bool(shutil.which("demucs"))}
+    return {
+        "ok": True,
+        "ffmpeg": bool(shutil.which("ffmpeg")),
+        "demucs": bool(shutil.which("demucs")),
+        "reasoning": ["openai", "gemini"],
+    }
 
 
 @app.post("/transcribe")
@@ -153,10 +166,7 @@ async def transcribe(
             })
 
         if mode == "arrange" or instrument == "flute":
-            if instrument == "flute":
-                events = reduce_to_melody(events, 60, 96)
-            else:
-                events = reduce_to_melody(events, 40, 88)
+            events = reduce_to_melody(events, 60 if instrument == "flute" else 40, 96 if instrument == "flute" else 88)
         else:
             events = [e for e in events if e["confidence"] >= 0.22]
             events.sort(key=lambda e: (e["start"], -e["confidence"]))
@@ -173,8 +183,29 @@ async def transcribe(
         midi_path = workdir / "raw.mid"
         midi_data.write(str(midi_path))
         midi_b64 = base64.b64encode(midi_path.read_bytes()).decode("ascii")
-
         duration = max((e["end"] for e in events), default=0.0)
+
+        warnings = (
+            [
+                "Automatic transcription is approximate, especially on dense full mixes.",
+                "Guitar TAB fingering is an MVP heuristic and is not yet optimized for hand position or chords.",
+            ]
+            if instrument == "guitar"
+            else ["Flute mode extracts an approximate monophonic melody and may need manual correction."]
+        )
+
+        document = build_music_document(
+            title=title,
+            instrument=instrument,
+            mode=mode,
+            duration_seconds=duration,
+            notes=events,
+            warnings=warnings,
+            midi_base64=midi_b64,
+        )
+
+        # Backward-compatible fields keep the current extension renderer working while
+        # MusicDocument becomes the canonical object for all new features.
         return {
             "title": title,
             "instrument": instrument,
@@ -182,10 +213,21 @@ async def transcribe(
             "duration_seconds": duration,
             "notes": events,
             "midi_base64": midi_b64,
-            "warnings": [
-                "Automatic transcription is approximate, especially on dense full mixes.",
-                "Guitar TAB fingering is an MVP heuristic and is not yet optimized for hand position or chords."
-            ] if instrument == "guitar" else [
-                "Flute mode extracts an approximate monophonic upper melody and may need manual correction."
-            ]
+            "warnings": warnings,
+            "music_document": document,
         }
+
+
+@app.post("/reason")
+def reason(request: ReasonRequest):
+    question = request.question.strip()
+    if not question:
+        raise HTTPException(400, "question is required")
+    if request.music_document.get("schema") != "youtube-music-notes.music-document":
+        raise HTTPException(400, "invalid MusicDocument schema")
+    try:
+        return reason_about_music(request.music_document, question, request.provider)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    except Exception as e:
+        raise HTTPException(500, str(e)) from e

@@ -1,0 +1,56 @@
+name: Build Chrome extension
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'extension/**'
+      - 'web/src/guitarEngine.js'
+      - '.github/workflows/build-extension.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: extension/package.json
+
+      - name: Install dependencies
+        working-directory: extension
+        run: npm install
+
+      - name: Build browser transcription bundle
+        working-directory: extension
+        run: npm run build
+
+      - name: Prepare extension package
+        run: |
+          mkdir -p extension-package/dist
+          cp extension/manifest.json extension-package/
+          cp extension/offscreen.html extension-package/
+          cp extension/popup.html extension-package/
+          cp extension/popup.js extension-package/
+          cp extension/popup.css extension-package/
+          cp extension/result.html extension-package/
+          cp extension/result.js extension-package/
+          cp extension/result.css extension-package/
+          cp extension/service_worker.js extension-package/
+          cp extension/dist/offscreen.bundle.js extension-package/dist/
+
+      - name: Upload ready-to-load extension
+        uses: actions/upload-artifact@v4
+        with:
+          name: youtube-music-notes-chrome-extension
+          path: extension-package/
+          if-no-files-found: error

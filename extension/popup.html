@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>YouTube Music Notes</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <main>
+    <h1>YouTube Music Notes</h1>
+    <p class="sub">Play a song, capture a section, then turn it into a guitar or flute chart.</p>
+
+    <label>Instrument
+      <select id="instrument">
+        <option value="guitar">Guitar</option>
+        <option value="flute">Flute</option>
+      </select>
+    </label>
+
+    <label>Mode
+      <select id="mode">
+        <option value="arrange">Arrange melody for instrument</option>
+        <option value="transcribe">Transcribe recorded part</option>
+      </select>
+    </label>
+
+    <div class="buttons">
+      <button id="start">Start capture</button>
+      <button id="stop" class="secondary">Stop & analyse</button>
+    </div>
+
+    <div id="status">Ready.</div>
+    <p class="hint">Tip: for the cleanest result, capture 20–60 seconds first.</p>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

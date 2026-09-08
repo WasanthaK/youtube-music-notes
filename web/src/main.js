@@ -1,5 +1,5 @@
 import './styles.css';
-import { BasicPitch, noteFramesToTime, outputToNotesPoly } from '@spotify/basic-pitch';
+import { BasicPitch, addPitchBendsToNoteEvents, noteFramesToTime, outputToNotesPoly } from '@spotify/basic-pitch';
 import { createClient } from '@supabase/supabase-js';
 
 const MODEL_URL = 'https://unpkg.com/@spotify/basic-pitch@1.0.1/model/model.json';
@@ -172,15 +172,21 @@ async function transcribe(blob, source='browser-tab-capture'){
     const frames=[]; const onsets=[]; const contours=[];
     if(status) status.textContent='Analysing notes in browser…';
     await basicPitch.evaluateModel(audioBuffer,(f,o,c)=>{frames.push(...f);onsets.push(...o);contours.push(...c);},p=>{if(status) status.textContent=`Analysing notes… ${Math.round(p*100)}%`;});
-    const raw=outputToNotesPoly(frames,onsets,0.25,0.25,5);
-    noteFramesToTime(raw);
-    let notes=raw.map(n=>({start:n.startTimeSeconds,end:n.startTimeSeconds+n.durationSeconds,midi:n.pitchMidi,confidence:n.amplitude,name:midiName(n.pitchMidi)}));
+
+    const timedNotes = noteFramesToTime(
+      addPitchBendsToNoteEvents(
+        contours,
+        outputToNotesPoly(frames,onsets,0.25,0.25,5)
+      )
+    );
+    let notes=timedNotes.map(n=>({start:n.startTimeSeconds,end:n.startTimeSeconds+n.durationSeconds,midi:n.pitchMidi,confidence:n.amplitude,name:midiName(n.pitchMidi)}));
+    const rawCount=notes.length;
     state.instrument=document.querySelector('#instrument').value;
     notes=reduceMelody(notes,state.instrument==='flute'?60:40,state.instrument==='flute'?96:88);
     if(state.instrument==='guitar') notes=notes.map(n=>({...n,guitar:guitarPosition(n.midi)})).filter(n=>n.guitar);
     state.notes=notes;
     state.musicDocument=buildDocument(document.querySelector('#title').value,state.instrument,notes,audioBuffer.duration,source);
-    if(status) status.textContent=`Done: ${notes.length} notes detected.`;
+    if(status) status.textContent=`Done: ${rawCount} notes detected by the model; ${notes.length} playable ${state.instrument} notes arranged.`;
     render();
   } catch(e){
     const message = isIOS

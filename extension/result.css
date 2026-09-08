@@ -1,0 +1,17 @@
+:root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #171717; background: #f3f3f3; }
+body { margin: 0; }
+header { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 20px 28px; background: #fff; border-bottom: 1px solid #ddd; position: sticky; top: 0; z-index: 2; }
+h1 { margin: 0; font-size: 22px; }
+#meta { margin: 5px 0 0; color: #666; font-size: 13px; }
+.actions { display: flex; gap: 8px; }
+button { border: 1px solid #bbb; border-radius: 8px; background: white; padding: 8px 12px; cursor: pointer; }
+main { max-width: 1200px; margin: 20px auto; padding: 0 20px 50px; }
+.card { background: #fff; border: 1px solid #ddd; border-radius: 12px; padding: 18px; margin-bottom: 16px; overflow: hidden; }
+h2 { margin: 0 0 14px; font-size: 16px; }
+#chart { overflow-x: auto; min-height: 220px; }
+svg { min-width: 900px; }
+.tableWrap { max-height: 420px; overflow: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; border-bottom: 1px solid #eee; padding: 8px; }
+th { position: sticky; top: 0; background: white; }
+.noteLabel { font-size: 11px; fill: #333; }

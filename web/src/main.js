@@ -1,7 +1,12 @@
 import './styles.css';
 import { BasicPitch, noteFramesToTime, outputToNotesPoly } from '@spotify/basic-pitch';
+import { createClient } from '@supabase/supabase-js';
 
 const MODEL_URL = 'https://unpkg.com/@spotify/basic-pitch@1.0.1/model/model.json';
+const SUPABASE_URL = 'https://kgoowanohmtprbwdokjd.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_4dlNhnTkkyQRx8CJTqWXfQ_tfx8bz-o';
+const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+
 const state = {
   stream: null,
   recorder: null,
@@ -9,6 +14,7 @@ const state = {
   musicDocument: null,
   notes: [],
   instrument: 'guitar',
+  session: null,
 };
 
 const noteNames = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
@@ -21,9 +27,9 @@ function guitarPosition(midi){
   return candidates[0] || null;
 }
 function reduceMelody(notes,min,max){
-  const f = notes.filter(n=>n.midi>=min&&n.midi<=max&&n.confidence>=0.18).sort((a,b)=>a.start-b.start||b.midi-a.midi);
+  const filtered = notes.filter(n=>n.midi>=min&&n.midi<=max&&n.confidence>=0.18).sort((a,b)=>a.start-b.start||b.midi-a.midi);
   const out=[];
-  for(const n of f){
+  for(const n of filtered){
     if(!out.length || n.start-out[out.length-1].start>0.09) out.push(n);
     else if(n.confidence>out[out.length-1].confidence) out[out.length-1]=n;
   }
@@ -43,7 +49,13 @@ function buildDocument(title,instrument,notes,duration){
 function app(){
   document.querySelector('#app').innerHTML = `
     <main class="shell">
-      <header class="top"><div class="brand"><h1>YouTube Music Notes</h1><p>Capture a browser tab, create playable notes, then learn with an AI music teacher.</p></div><div class="badge">Private-by-default transcription</div></header>
+      <header class="top">
+        <div class="brand"><h1>YouTube Music Notes</h1><p>Turn music into playable notes, then learn it with an AI music teacher.</p></div>
+        <div id="account" class="account"></div>
+      </header>
+
+      <section id="authBanner" class="auth-card"></section>
+
       <section class="grid">
         <div class="card"><h2>1. Capture & transcribe</h2>
           <div class="controls">
@@ -52,18 +64,58 @@ function app(){
           </div>
           <div class="row"><button class="primary" id="start">Select YouTube tab</button><button class="danger" id="stop" disabled>Stop & analyse</button></div>
           <div class="status" id="status">Ready. Choose a browser tab and make sure “Share tab audio” is enabled.</div>
-          <p class="muted">Audio transcription runs in your browser. For best results, capture 20–45 seconds of a clear musical section.</p>
+          <p class="muted">Transcription runs locally in your browser and does not use your AI allowance.</p>
         </div>
+
         <div class="card"><h2>2. AI music teacher</h2>
-          <div class="controls"><div class="field"><label>Provider</label><select id="provider"><option value="openai">OpenAI</option><option value="gemini">Gemini</option></select></div><div class="field"><label>Reasoning API URL</label><input id="api" placeholder="https://your-api.example.com" /></div></div>
+          <div class="teacher-head">
+            <div class="field"><label>Provider</label><select id="provider"><option value="openai">OpenAI</option><option value="gemini">Gemini</option></select></div>
+            <div id="quota" class="quota">Free plan · sign in to use AI</div>
+          </div>
           <div class="quick" id="quick"><button>Explain this passage</button><button>Teach me this</button><button>Make it easier</button><button>What scale fits?</button><button>Create a practice exercise</button><button>Convert for another instrument</button></div>
           <textarea id="question" placeholder="Ask about harmony, fingering, technique, practice strategy…"></textarea>
           <div class="row"><button class="secondary" id="ask">Ask AI teacher</button></div>
-          <div class="answer" id="answer">Transcribe some music first, then ask a question.</div>
+          <div class="answer" id="answer">Transcribe some music, then sign in to ask your AI teacher.</div>
         </div>
+
         <div class="card full"><h2>3. Notes</h2><div class="score tabs" id="score">No transcription yet.</div><div class="row"><button id="download" class="secondary" disabled>Download MusicDocument JSON</button></div></div>
       </section>
     </main>`;
+}
+
+function renderAuth(){
+  const account=document.querySelector('#account');
+  const banner=document.querySelector('#authBanner');
+  if(state.session?.user){
+    const user=state.session.user;
+    const name=user.user_metadata?.full_name || user.user_metadata?.name || user.email || 'Signed in';
+    account.innerHTML=`<span class="user-pill">${escapeHtml(name)}</span><button id="signout" class="small">Sign out</button>`;
+    banner.innerHTML=`<div><strong>Free account active</strong><span> Browser transcription is unlimited. AI teacher: 5 questions/day, 50/month.</span></div>`;
+    document.querySelector('#signout').onclick=async()=>{ await supabase.auth.signOut(); };
+  } else {
+    account.innerHTML='<span class="badge">Private-by-default transcription</span>';
+    banner.innerHTML=`
+      <div class="auth-copy"><strong>Sign in for the free AI teacher</strong><span> Transcription stays free and local. Sign-in protects the shared AI allowance from abuse.</span></div>
+      <div class="social-row">
+        <button data-provider="google" class="social">Google</button>
+        <button data-provider="facebook" class="social">Facebook</button>
+        <button data-provider="github" class="social">GitHub</button>
+        <button data-provider="azure" class="social">Microsoft</button>
+      </div>`;
+    banner.querySelectorAll('[data-provider]').forEach(btn=>btn.onclick=()=>socialSignIn(btn.dataset.provider));
+  }
+}
+
+function escapeHtml(value=''){
+  return String(value).replace(/[&<>'"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
+}
+
+async function socialSignIn(provider){
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider,
+    options:{ redirectTo: window.location.href.split('#')[0].split('?')[0] }
+  });
+  if(error) document.querySelector('#answer').textContent=`Sign-in error: ${error.message}`;
 }
 
 function renderGuitar(notes){
@@ -80,8 +132,8 @@ function renderFlute(notes){
   return `<table class="note-table"><thead><tr><th>Time</th><th>Note</th><th>Length</th><th>Confidence</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 function render(){
-  const s=document.querySelector('#score');
-  s.innerHTML = state.instrument==='guitar' ? renderGuitar(state.notes) : renderFlute(state.notes);
+  const score=document.querySelector('#score');
+  score.innerHTML = state.instrument==='guitar' ? renderGuitar(state.notes) : renderFlute(state.notes);
   document.querySelector('#download').disabled=!state.musicDocument;
 }
 
@@ -129,23 +181,47 @@ async function startCapture(){
 }
 async function stopCapture(){
   if(!state.recorder || state.recorder.state==='inactive') return;
-  const done=new Promise(r=>state.recorder.addEventListener('stop',r,{once:true})); state.recorder.stop(); await done;
+  const done=new Promise(resolve=>state.recorder.addEventListener('stop',resolve,{once:true})); state.recorder.stop(); await done;
   state.stream?.getTracks().forEach(t=>t.stop()); document.querySelector('#start').disabled=false; document.querySelector('#stop').disabled=true;
   await transcribe(new Blob(state.chunks,{type:'audio/webm'}));
 }
+
 async function askAI(){
-  const answer=document.querySelector('#answer'); const api=document.querySelector('#api').value.trim().replace(/\/$/,'');
+  const answer=document.querySelector('#answer');
   if(!state.musicDocument){answer.textContent='Transcribe some music first.';return;}
-  if(!api){answer.textContent='Add the deployed reasoning API URL first. API keys stay on that server, not in this page.';return;}
-  const question=document.querySelector('#question').value.trim(); if(!question){answer.textContent='Enter a question first.';return;}
+  if(!state.session?.access_token){answer.textContent='Sign in with Google, Facebook, GitHub or Microsoft to use the free AI teacher.';return;}
+  const question=document.querySelector('#question').value.trim();
+  if(!question){answer.textContent='Enter a question first.';return;}
   answer.textContent='Thinking…';
   try{
-    const res=await fetch(`${api}/reason`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({music_document:state.musicDocument,question,provider:document.querySelector('#provider').value})});
-    const data=await res.json(); if(!res.ok) throw new Error(data.detail||'Reasoning request failed'); answer.textContent=data.answer;
+    const res=await fetch(`${SUPABASE_URL}/functions/v1/music-teacher`,{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'Authorization':`Bearer ${state.session.access_token}`,
+        'apikey':SUPABASE_PUBLISHABLE_KEY,
+      },
+      body:JSON.stringify({music_document:state.musicDocument,question,provider:document.querySelector('#provider').value})
+    });
+    const data=await res.json();
+    if(!res.ok) throw new Error(data.error||'AI teacher request failed');
+    answer.textContent=data.answer;
+    if(data.usage&&data.limits) document.querySelector('#quota').textContent=`${data.plan} · ${data.usage.daily}/${data.limits.daily} today · ${data.usage.monthly}/${data.limits.monthly} this month`;
   }catch(e){answer.textContent=e.message;}
 }
 
 app();
-document.querySelector('#start').onclick=startCapture; document.querySelector('#stop').onclick=stopCapture; document.querySelector('#ask').onclick=askAI;
+document.querySelector('#start').onclick=startCapture;
+document.querySelector('#stop').onclick=stopCapture;
+document.querySelector('#ask').onclick=askAI;
 document.querySelectorAll('#quick button').forEach(b=>b.onclick=()=>document.querySelector('#question').value=b.textContent);
 document.querySelector('#download').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(state.musicDocument,null,2)],{type:'application/json'}));a.download='music-document.json';a.click();};
+
+const { data:{ session } } = await supabase.auth.getSession();
+state.session=session;
+renderAuth();
+supabase.auth.onAuthStateChange((_event,session)=>{
+  state.session=session;
+  renderAuth();
+  if(!session) document.querySelector('#quota').textContent='Free plan · sign in to use AI';
+});

@@ -28,8 +28,6 @@ async function ensureOffscreen() {
     });
   }
 
-  // createDocument() can resolve before the bundle has registered its runtime listener.
-  // PING with retry makes capture deterministic instead of racing extension startup.
   await sendToOffscreen({ target: 'offscreen', type: 'PING' });
 }
 
@@ -205,6 +203,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'STOP_CAPTURE') {
       const tab = await activeTab().catch(() => null);
       await stopCapture(tab?.id || null);
+      sendResponse({ ok: true });
+      return;
+    }
+
+    if (message.type === 'ANALYSIS_PROGRESS') {
+      await chrome.storage.local.set({
+        captureState: 'analysing',
+        captureMessage: message.captureMessage || 'Analysing locally…'
+      });
       sendResponse({ ok: true });
       return;
     }

@@ -1,5 +1,5 @@
 import { BasicPitch, addPitchBendsToNoteEvents, noteFramesToTime, outputToNotesPoly } from '@spotify/basic-pitch';
-import { buildGuitarTranscription } from '../../web/src/guitarEngine.js';
+import { buildGuitarTranscription } from './guitarEngine.js';
 
 const MODEL_URL = 'https://unpkg.com/@spotify/basic-pitch@1.0.1/model/model.json';
 const SUPABASE_URL = 'https://kgoowanohmtprbwdokjd.supabase.co';
@@ -194,6 +194,7 @@ async function saveDiagnostic(result) {
       method: 'POST',
       headers: {
         apikey: SUPABASE_PUBLISHABLE_KEY,
+        Authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
         'Content-Type': 'application/json',
         Prefer: 'return=minimal'
       },

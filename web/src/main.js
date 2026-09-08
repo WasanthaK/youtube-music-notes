@@ -6,6 +6,7 @@ const MODEL_URL = 'https://unpkg.com/@spotify/basic-pitch@1.0.1/model/model.json
 const SUPABASE_URL = 'https://kgoowanohmtprbwdokjd.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_4dlNhnTkkyQRx8CJTqWXfQ_tfx8bz-o';
 const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
 const state = {
   stream: null,
@@ -35,15 +36,27 @@ function reduceMelody(notes,min,max){
   }
   return out;
 }
-function buildDocument(title,instrument,notes,duration){
+function buildDocument(title,instrument,notes,duration,source='browser-tab-capture'){
   return {
     schema:'youtube-music-notes.music-document',schema_version:'0.1.0',
-    track:{title,source:'browser-tab-capture',duration_seconds:duration},
+    track:{title,source,duration_seconds:duration},
     analysis:{requested_instrument:instrument,mode:'arrange',confidence_summary:null,warnings:['Browser transcription is approximate on dense mixes.']},
     tempo:{bpm:null,confidence:null},meter:{time_signature:null,confidence:null},key:{tonic:null,mode:null,confidence:null},
     sections:[],measures:[],chords:[],instruments:[{name:instrument,role:'target',source:'arranged'}],notes,
     exports:{midi_base64:null},learning:{difficulty:null,skills:[],practice_points:[]}
   };
+}
+
+function captureControls(){
+  if(isIOS){
+    return `
+      <div class="status"><strong>iPhone/iPad:</strong> iOS browsers cannot capture another app or browser tab's audio. Use an audio file or a screen recording saved on the device.</div>
+      <div class="row"><button class="primary" id="uploadBtn">Choose audio / screen recording</button></div>
+      <input id="fileInput" type="file" accept="audio/*,video/*,.m4a,.mp3,.wav,.aac,.mp4,.mov" style="display:none" />`;
+  }
+  return `
+    <div class="row"><button class="primary" id="start">Select YouTube tab</button><button class="danger" id="stop" disabled>Stop & analyse</button></div>
+    <div class="status" id="status">Ready. Choose a browser tab and make sure “Share tab audio” is enabled.</div>`;
 }
 
 function app(){
@@ -62,8 +75,7 @@ function app(){
             <div class="field"><label>Instrument</label><select id="instrument"><option value="guitar">Guitar</option><option value="flute">Flute</option></select></div>
             <div class="field"><label>Track title</label><input id="title" value="Captured song" /></div>
           </div>
-          <div class="row"><button class="primary" id="start">Select YouTube tab</button><button class="danger" id="stop" disabled>Stop & analyse</button></div>
-          <div class="status" id="status">Ready. Choose a browser tab and make sure “Share tab audio” is enabled.</div>
+          ${captureControls()}
           <p class="muted">Transcription runs locally in your browser and does not use your AI allowance.</p>
         </div>
 
@@ -139,30 +151,43 @@ function render(){
 
 async function decodeToMono22050(blob){
   const ctx=new AudioContext();
-  const input=await ctx.decodeAudioData(await blob.arrayBuffer());
-  const offline=new OfflineAudioContext(1,Math.ceil(input.duration*22050),22050);
-  const src=offline.createBufferSource(); src.buffer=input; src.connect(offline.destination); src.start();
-  const rendered=await offline.startRendering(); await ctx.close();
-  return rendered;
+  try{
+    const input=await ctx.decodeAudioData(await blob.arrayBuffer());
+    const offline=new OfflineAudioContext(1,Math.ceil(input.duration*22050),22050);
+    const src=offline.createBufferSource(); src.buffer=input; src.connect(offline.destination); src.start();
+    const rendered=await offline.startRendering();
+    return rendered;
+  } finally {
+    await ctx.close();
+  }
 }
 
-async function transcribe(blob){
-  const status=document.querySelector('#status'); status.textContent='Preparing audio…';
-  const audioBuffer=await decodeToMono22050(blob);
-  status.textContent='Loading transcription model…';
-  const basicPitch=new BasicPitch(MODEL_URL);
-  const frames=[]; const onsets=[]; const contours=[];
-  status.textContent='Analysing notes in browser…';
-  await basicPitch.evaluateModel(audioBuffer,(f,o,c)=>{frames.push(...f);onsets.push(...o);contours.push(...c);},p=>{status.textContent=`Analysing notes… ${Math.round(p*100)}%`;});
-  const raw=outputToNotesPoly(frames,onsets,0.25,0.25,5);
-  noteFramesToTime(raw);
-  let notes=raw.map(n=>({start:n.startTimeSeconds,end:n.startTimeSeconds+n.durationSeconds,midi:n.pitchMidi,confidence:n.amplitude,name:midiName(n.pitchMidi)}));
-  state.instrument=document.querySelector('#instrument').value;
-  notes=reduceMelody(notes,state.instrument==='flute'?60:40,state.instrument==='flute'?96:88);
-  if(state.instrument==='guitar') notes=notes.map(n=>({...n,guitar:guitarPosition(n.midi)})).filter(n=>n.guitar);
-  state.notes=notes;
-  state.musicDocument=buildDocument(document.querySelector('#title').value,state.instrument,notes,audioBuffer.duration);
-  status.textContent=`Done: ${notes.length} notes detected.`; render();
+async function transcribe(blob, source='browser-tab-capture'){
+  const status=document.querySelector('#status') || document.querySelector('#mobileStatus');
+  try{
+    if(status) status.textContent='Preparing audio…';
+    const audioBuffer=await decodeToMono22050(blob);
+    if(status) status.textContent='Loading transcription model…';
+    const basicPitch=new BasicPitch(MODEL_URL);
+    const frames=[]; const onsets=[]; const contours=[];
+    if(status) status.textContent='Analysing notes in browser…';
+    await basicPitch.evaluateModel(audioBuffer,(f,o,c)=>{frames.push(...f);onsets.push(...o);contours.push(...c);},p=>{if(status) status.textContent=`Analysing notes… ${Math.round(p*100)}%`;});
+    const raw=outputToNotesPoly(frames,onsets,0.25,0.25,5);
+    noteFramesToTime(raw);
+    let notes=raw.map(n=>({start:n.startTimeSeconds,end:n.startTimeSeconds+n.durationSeconds,midi:n.pitchMidi,confidence:n.amplitude,name:midiName(n.pitchMidi)}));
+    state.instrument=document.querySelector('#instrument').value;
+    notes=reduceMelody(notes,state.instrument==='flute'?60:40,state.instrument==='flute'?96:88);
+    if(state.instrument==='guitar') notes=notes.map(n=>({...n,guitar:guitarPosition(n.midi)})).filter(n=>n.guitar);
+    state.notes=notes;
+    state.musicDocument=buildDocument(document.querySelector('#title').value,state.instrument,notes,audioBuffer.duration,source);
+    if(status) status.textContent=`Done: ${notes.length} notes detected.`;
+    render();
+  } catch(e){
+    const message = isIOS
+      ? `Could not decode this file on iPhone/iPad: ${e.message}. Try an M4A, MP3 or WAV audio file; some MOV/MP4 screen recordings may not expose their audio track to Safari.`
+      : e.message;
+    if(status) status.textContent=message;
+  }
 }
 
 async function startCapture(){
@@ -184,6 +209,20 @@ async function stopCapture(){
   const done=new Promise(resolve=>state.recorder.addEventListener('stop',resolve,{once:true})); state.recorder.stop(); await done;
   state.stream?.getTracks().forEach(t=>t.stop()); document.querySelector('#start').disabled=false; document.querySelector('#stop').disabled=true;
   await transcribe(new Blob(state.chunks,{type:'audio/webm'}));
+}
+
+async function handleUpload(file){
+  if(!file) return;
+  let status=document.querySelector('#mobileStatus');
+  if(!status){
+    status=document.createElement('div');
+    status.id='mobileStatus';
+    status.className='status';
+    document.querySelector('#uploadBtn').parentElement.after(status);
+  }
+  status.textContent=`Selected ${file.name}. Preparing locally…`;
+  if(document.querySelector('#title').value==='Captured song') document.querySelector('#title').value=file.name.replace(/\.[^.]+$/,'');
+  await transcribe(file,'uploaded-file');
 }
 
 async function askAI(){
@@ -211,8 +250,13 @@ async function askAI(){
 }
 
 app();
-document.querySelector('#start').onclick=startCapture;
-document.querySelector('#stop').onclick=stopCapture;
+if(isIOS){
+  document.querySelector('#uploadBtn').onclick=()=>document.querySelector('#fileInput').click();
+  document.querySelector('#fileInput').onchange=e=>handleUpload(e.target.files?.[0]);
+} else {
+  document.querySelector('#start').onclick=startCapture;
+  document.querySelector('#stop').onclick=stopCapture;
+}
 document.querySelector('#ask').onclick=askAI;
 document.querySelectorAll('#quick button').forEach(b=>b.onclick=()=>document.querySelector('#question').value=b.textContent);
 document.querySelector('#download').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(state.musicDocument,null,2)],{type:'application/json'}));a.download='music-document.json';a.click();};

@@ -9,7 +9,7 @@
 <body>
   <main>
     <h1>YouTube Music Notes</h1>
-    <p class="sub">Play a song, capture a section, then turn it into a guitar or flute chart.</p>
+    <p class="sub">Choose an exact YouTube passage, then turn it into a playable chart.</p>
 
     <label>Instrument
       <select id="instrument">
@@ -25,13 +25,22 @@
       </select>
     </label>
 
+    <div class="segment-grid">
+      <label>Start
+        <input id="startTime" value="0:00" placeholder="0:00" />
+      </label>
+      <label>End
+        <input id="endTime" value="1:00" placeholder="1:00" />
+      </label>
+    </div>
+
     <div class="buttons">
-      <button id="start">Start capture</button>
-      <button id="stop" class="secondary">Stop & analyse</button>
+      <button id="start">Analyse exact segment</button>
+      <button id="stop" class="secondary">Stop</button>
     </div>
 
     <div id="status">Ready.</div>
-    <p class="hint">Tip: for the cleanest result, capture 20–60 seconds first.</p>
+    <p class="hint">Use the same YouTube video + start/end times for repeatable benchmarks.</p>
   </main>
   <script src="popup.js"></script>
 </body>

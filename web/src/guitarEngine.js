@@ -82,7 +82,7 @@ function mergePassDetections(passResults) {
     const weightedStart = detections.reduce((sum, n) => sum + n.start * Math.max(0.05, n.amplitude), 0) / weightTotal;
     const weightedEnd = detections.reduce((sum, n) => sum + n.end * Math.max(0.05, n.amplitude), 0) / weightTotal;
     const consensus = support / PASSES.length;
-    const confidence = clamp01((best.amplitude * 0.65) + (consensus * 0.35));
+    const confidence = clamp01((best.amplitude * 0.62) + (consensus * 0.38));
 
     return {
       start: weightedStart,
@@ -95,12 +95,30 @@ function mergePassDetections(passResults) {
       detectionSources: sources,
       pitchBends: best.pitchBends,
     };
-  }).filter(note => {
-    if (note.duration < 0.04) return false;
-    if (note.consensus >= 2 / 3) return true;
-    if (note.amplitude >= 0.52) return true;
-    return note.duration >= 0.16 && note.confidence >= 0.34;
-  }).sort((a, b) => a.start - b.start || a.midi - b.midi);
+  }).filter(note => note.duration >= 0.04)
+    .sort((a, b) => a.start - b.start || a.midi - b.midi);
+}
+
+function isTeachingCandidate(note) {
+  const sources = new Set(note.detectionSources);
+  const strict = sources.has('strict');
+  const balanced = sources.has('balanced');
+  const sensitive = sources.has('sensitive');
+
+  // Strong consensus is the best signal that this is a real played note.
+  if (sources.size >= 2) return note.confidence >= 0.38 && note.duration >= 0.05;
+
+  // Strict-only detections are conservative enough to retain when they have body.
+  if (strict) return note.amplitude >= 0.38 && note.duration >= 0.06;
+
+  // Balanced-only notes need slightly stronger evidence.
+  if (balanced) return note.amplitude >= 0.46 && note.duration >= 0.08;
+
+  // Sensitive-only detections are where harmonics/noise explode on mixed recordings.
+  // Keep them for diagnostics, but only promote unusually strong sustained events to TAB.
+  if (sensitive) return note.amplitude >= 0.66 && note.duration >= 0.14;
+
+  return false;
 }
 
 function positionCandidates(midi) {
@@ -203,7 +221,8 @@ function bendSemitones(pitchBends) {
 export function buildGuitarTranscription(frames, onsets, contours) {
   const passResults = PASSES.map(pass => decodePass(frames, onsets, contours, pass));
   const merged = mergePassDetections(passResults);
-  const clusters = groupIntoOnsets(merged);
+  const teachingCandidates = merged.filter(isTeachingCandidate);
+  const clusters = groupIntoOnsets(teachingCandidates);
 
   const playable = [];
   let previousHandPosition = 3;
@@ -223,17 +242,21 @@ export function buildGuitarTranscription(frames, onsets, contours) {
   playable.sort((a, b) => a.start - b.start || a.guitar.string - b.guitar.string);
 
   const highConfidence = playable.filter(note => note.confidence >= 0.67).length;
-  const uncertain = playable.filter(note => note.confidence < 0.45).length;
+  const uncertain = playable.filter(note => note.confidence < 0.48).length;
   const averageConfidence = playable.length
     ? playable.reduce((sum, note) => sum + note.confidence, 0) / playable.length
     : 0;
+  const sensitiveOnly = merged.filter(note => note.detectionSources.length === 1 && note.detectionSources[0] === 'sensitive').length;
 
   return {
-    engine: 'guitar-basic-pitch-ensemble-v1',
+    engine: 'guitar-basic-pitch-ensemble-v1.1',
     notes: playable,
     summary: {
       rawByPass: Object.fromEntries(PASSES.map((pass, index) => [pass.id, passResults[index].length])),
       mergedCandidates: merged.length,
+      teachingCandidates: teachingCandidates.length,
+      rejectedAsNoise: merged.length - teachingCandidates.length,
+      sensitiveOnly,
       playableNotes: playable.length,
       onsetGroups: clusters.length,
       highConfidence,

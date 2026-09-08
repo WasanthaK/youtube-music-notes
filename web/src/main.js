@@ -23,6 +23,7 @@ const state = {
 const noteNames = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 
 function midiName(midi){ return `${noteNames[midi % 12]}${Math.floor(midi / 12) - 1}`; }
+function perSecond(count,duration){ return duration > 0 ? count / duration : 0; }
 
 function reduceMelody(notes,min,max){
   const filtered = notes
@@ -89,7 +90,7 @@ function app(){
             <div class="field"><label>Track title</label><input id="title" value="Captured song" /></div>
           </div>
           ${captureControls()}
-          <p class="muted">Guitar now uses an adaptive multi-pass detector that preserves chords and scores note confidence. Transcription runs locally and does not use your AI allowance.</p>
+          <p class="muted">Guitar uses a multi-pass detector plus a teaching-note confidence gate. For benchmark comparisons, use the same song passage and roughly the same recording duration.</p>
         </div>
 
         <div class="card"><h2>2. AI music teacher</h2>
@@ -152,9 +153,9 @@ function render(){
   const score=document.querySelector('#score');
   if(state.instrument === 'guitar'){
     const tab = renderGuitarTab(state.notes);
-    const summary = state.engineSummary;
-    const quality = summary
-      ? `<div class="muted">Engine: guitar-basic-pitch-ensemble-v1 · ${summary.playableNotes} playable notes · ${summary.onsetGroups} onset groups · ${Math.round(summary.averageConfidence*100)}% average confidence · ${summary.uncertain} uncertain</div>`
+    const s = state.engineSummary;
+    const quality = s
+      ? `<div class="muted">Engine: guitar-basic-pitch-ensemble-v1.1 · ${s.durationSeconds.toFixed(1)}s · ${s.teachingCandidates} teaching candidates · ${s.rejectedAsNoise} rejected as noise · ${s.playableNotes} playable · ${s.playablePerSecond.toFixed(2)} notes/s · ${Math.round(s.averageConfidence*100)}% avg confidence · ${s.uncertain} uncertain</div>`
       : '';
     score.innerHTML = `${quality}<pre>${tab}</pre>`;
   } else {
@@ -217,17 +218,25 @@ async function transcribe(blob, source='browser-tab-capture'){
     state.instrument=document.querySelector('#instrument').value;
     if(state.instrument === 'guitar'){
       const result = buildGuitarTranscription(frames,onsets,contours);
+      const duration = audioBuffer.duration;
+      const s = {
+        ...result.summary,
+        durationSeconds: duration,
+        mergedPerSecond: perSecond(result.summary.mergedCandidates,duration),
+        teachingPerSecond: perSecond(result.summary.teachingCandidates,duration),
+        playablePerSecond: perSecond(result.summary.playableNotes,duration),
+        onsetGroupsPerSecond: perSecond(result.summary.onsetGroups,duration),
+      };
       state.notes = result.notes.map(note=>({...note,name:midiName(note.midi)}));
-      state.engineSummary = result.summary;
+      state.engineSummary = s;
       if(status){
-        const s=result.summary;
-        status.textContent=`Done: strict ${s.rawByPass.strict}, balanced ${s.rawByPass.balanced}, sensitive ${s.rawByPass.sensitive}; ${s.mergedCandidates} merged candidates → ${s.playableNotes} playable guitar notes in ${s.onsetGroups} onset groups. ${s.uncertain} uncertain.`;
+        status.textContent=`Done ${duration.toFixed(1)}s: strict ${s.rawByPass.strict}, balanced ${s.rawByPass.balanced}, sensitive ${s.rawByPass.sensitive}; ${s.mergedCandidates} merged → ${s.teachingCandidates} teaching candidates (${s.rejectedAsNoise} rejected, ${s.sensitiveOnly} sensitive-only) → ${s.playableNotes} playable in ${s.onsetGroups} onset groups; ${s.playablePerSecond.toFixed(2)} playable notes/s; ${s.uncertain} uncertain.`;
       }
     } else {
       const result=buildFluteTranscription(frames,onsets,contours);
       state.notes=result.notes;
-      state.engineSummary=result.summary;
-      if(status) status.textContent=`Done: ${result.summary.rawCount} notes detected; ${result.summary.playableNotes} flute melody notes retained.`;
+      state.engineSummary={...result.summary,durationSeconds:audioBuffer.duration};
+      if(status) status.textContent=`Done ${audioBuffer.duration.toFixed(1)}s: ${result.summary.rawCount} notes detected; ${result.summary.playableNotes} flute melody notes retained.`;
     }
 
     state.musicDocument=buildDocument(

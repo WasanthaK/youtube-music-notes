@@ -107,6 +107,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       const startSeconds = Number(message.startSeconds);
       const endSeconds = Number(message.endSeconds);
+      const benchmarkMode = message.benchmarkMode || 'manual-segment';
       if (!Number.isFinite(startSeconds) || !Number.isFinite(endSeconds) || startSeconds < 0 || endSeconds <= startSeconds) {
         throw new Error('Invalid start/end time range.');
       }
@@ -119,17 +120,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       await ensureOffscreen();
       const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
       const segmentSeconds = endSeconds - startSeconds;
+      const benchmark = {
+        mode: benchmarkMode,
+        videoId,
+        videoUrl: `https://www.youtube.com/watch?v=${videoId}`,
+        startSeconds,
+        endSeconds,
+        requestedDurationSeconds: segmentSeconds
+      };
 
       await chrome.storage.local.set({
         captureState: 'recording',
         captureMessage: `Recording YouTube ${videoId}: ${startSeconds.toFixed(1)}s → ${endSeconds.toFixed(1)}s (${segmentSeconds.toFixed(1)}s)…`,
-        captureBenchmark: {
-          videoId,
-          videoUrl: `https://www.youtube.com/watch?v=${videoId}`,
-          startSeconds,
-          endSeconds,
-          requestedDurationSeconds: segmentSeconds
-        }
+        captureBenchmark: benchmark
       });
 
       await chrome.runtime.sendMessage({
@@ -139,8 +142,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         instrument: message.instrument,
         mode: message.mode,
         title: tab.title || prepared?.title || 'Captured audio',
+        benchmarkMode,
         videoId,
-        videoUrl: `https://www.youtube.com/watch?v=${videoId}`,
+        videoUrl: benchmark.videoUrl,
         startSeconds,
         endSeconds,
         requestedDurationSeconds: segmentSeconds
@@ -154,7 +158,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
       }, Math.ceil(segmentSeconds * 1000));
 
-      sendResponse({ ok: true, videoId, startSeconds, endSeconds });
+      sendResponse({ ok: true, ...benchmark });
       return;
     }
 

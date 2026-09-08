@@ -1,19 +1,28 @@
 from __future__ import annotations
 
 import base64
+import json
+import os
 import shutil
 import subprocess
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Any
+from urllib import request as urllib_request
 
+import pretty_midi
+from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from basic_pitch.inference import predict
 
+from guitar_engine import build_guitar_transcription
 from music_document import build_music_document
 from reasoning import reason_about_music
+
+load_dotenv(Path(__file__).with_name('.env'))
 
 app = FastAPI(title="YouTube Music Notes API")
 app.add_middleware(
@@ -25,6 +34,7 @@ app.add_middleware(
 
 NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 GUITAR_OPEN = [40, 45, 50, 55, 59, 64]
+DIAGNOSTICS_PATH = Path(__file__).with_name("transcription_diagnostics.jsonl")
 
 
 class ReasonRequest(BaseModel):
@@ -107,6 +117,104 @@ def try_guitar_stem(wav_path: Path, workdir: Path) -> Path:
     return candidates[0] if candidates else wav_path
 
 
+def make_midi(notes: List[Dict[str, Any]]) -> pretty_midi.PrettyMIDI:
+    midi = pretty_midi.PrettyMIDI()
+    instrument = pretty_midi.Instrument(program=25)
+    for note in notes:
+        velocity = max(1, min(127, int(round(float(note.get("confidence", 0.5)) * 127))))
+        instrument.notes.append(pretty_midi.Note(
+            velocity=velocity,
+            pitch=int(note["midi"]),
+            start=float(note["start"]),
+            end=max(float(note["start"]) + 0.04, float(note["end"])),
+        ))
+    midi.instruments.append(instrument)
+    return midi
+
+
+def record_diagnostic(row: Dict[str, Any]) -> Dict[str, Any]:
+    local_row = {**row, "created_at": datetime.now(timezone.utc).isoformat()}
+    with DIAGNOSTICS_PATH.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(local_row, ensure_ascii=False) + "\n")
+
+    supabase_url = os.getenv("SUPABASE_URL", "").rstrip("/")
+    service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+    if supabase_url and service_key:
+        payload = json.dumps(row).encode("utf-8")
+        req = urllib_request.Request(
+            f"{supabase_url}/rest/v1/transcription_diagnostics",
+            data=payload,
+            method="POST",
+            headers={
+                "apikey": service_key,
+                "Authorization": f"Bearer {service_key}",
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal",
+            },
+        )
+        try:
+            with urllib_request.urlopen(req, timeout=8) as response:
+                local_row["supabase_status"] = response.status
+        except Exception as exc:
+            local_row["supabase_error"] = str(exc)
+    else:
+        local_row["supabase_status"] = "not-configured"
+
+    return local_row
+
+
+def diagnostic_row(
+    *,
+    youtube_video_id: str | None,
+    youtube_url: str | None,
+    title: str,
+    source: str,
+    instrument: str,
+    duration: float,
+    engine: str,
+    summary: Dict[str, Any] | None,
+    start_seconds: float | None,
+    end_seconds: float | None,
+    requested_duration_seconds: float | None,
+) -> Dict[str, Any]:
+    summary = summary or {}
+    raw = summary.get("rawByPass") or {}
+    playable = int(summary.get("playableNotes", 0) or 0)
+    return {
+        "user_id": None,
+        "youtube_video_id": youtube_video_id,
+        "youtube_url": youtube_url,
+        "reference_label": f"{youtube_video_id or 'local'}:{start_seconds if start_seconds is not None else 0:.1f}-{end_seconds if end_seconds is not None else duration:.1f}",
+        "engine": engine,
+        "instrument": instrument,
+        "track_title": title,
+        "source": source,
+        "duration_seconds": round(float(duration), 3),
+        "raw_strict": raw.get("strict"),
+        "raw_balanced": raw.get("balanced"),
+        "raw_sensitive": raw.get("sensitive"),
+        "merged_candidates": summary.get("mergedCandidates"),
+        "teaching_candidates": summary.get("teachingCandidates"),
+        "rejected_as_noise": summary.get("rejectedAsNoise"),
+        "sensitive_only": summary.get("sensitiveOnly"),
+        "playable_notes": playable,
+        "onset_groups": summary.get("onsetGroups"),
+        "high_confidence": summary.get("highConfidence"),
+        "uncertain": summary.get("uncertain"),
+        "average_confidence": summary.get("averageConfidence"),
+        "playable_notes_per_second": round(playable / duration, 4) if duration > 0 else 0,
+        "source_histogram": {},
+        "confidence_buckets": {},
+        "browser_user_agent": None,
+        "extra": {
+            "sampling_mode": "fixed-30s-v1" if youtube_video_id and start_seconds == 30 and end_seconds == 60 else "manual-or-other",
+            "start_seconds": start_seconds,
+            "end_seconds": end_seconds,
+            "requested_duration_seconds": requested_duration_seconds,
+        },
+    }
+
+
 @app.get("/health")
 def health():
     return {
@@ -114,6 +222,9 @@ def health():
         "ffmpeg": bool(shutil.which("ffmpeg")),
         "demucs": bool(shutil.which("demucs")),
         "reasoning": ["openai", "gemini"],
+        "diagnostics_file": str(DIAGNOSTICS_PATH),
+        "supabase_diagnostics": bool(os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_SERVICE_ROLE_KEY")),
+        "guitar_engine": "guitar-basic-pitch-ensemble-v1.1-python",
     }
 
 
@@ -123,6 +234,11 @@ async def transcribe(
     instrument: str = Form("guitar"),
     mode: str = Form("arrange"),
     title: str = Form("Captured audio"),
+    youtube_video_id: str | None = Form(None),
+    youtube_url: str | None = Form(None),
+    start_seconds: float | None = Form(None),
+    end_seconds: float | None = Form(None),
+    requested_duration_seconds: float | None = Form(None),
 ):
     instrument = instrument.lower().strip()
     mode = mode.lower().strip()
@@ -139,56 +255,56 @@ async def transcribe(
 
         try:
             run_ffmpeg(src, wav)
-            analysis_source = wav
-            if mode == "transcribe" and instrument == "guitar":
-                analysis_source = try_guitar_stem(wav, workdir)
 
-            min_freq = midi_freq(40 if instrument == "guitar" else 60)
-            max_freq = midi_freq(88 if instrument == "guitar" else 96)
-            _, midi_data, note_events = predict(
-                analysis_source,
-                minimum_frequency=min_freq,
-                maximum_frequency=max_freq,
-                minimum_note_length=80,
-            )
+            if instrument == "guitar":
+                analysis_source = wav
+                if mode == "transcribe":
+                    analysis_source = try_guitar_stem(wav, workdir)
+                guitar_result = build_guitar_transcription(analysis_source)
+                events = []
+                for note in guitar_result["notes"]:
+                    events.append({
+                        **note,
+                        "name": midi_name(int(note["midi"])),
+                    })
+                engine = guitar_result["engine"]
+                summary = guitar_result["summary"]
+                midi_data = make_midi(events)
+            else:
+                min_freq = midi_freq(60)
+                max_freq = midi_freq(96)
+                _, midi_data, note_events = predict(
+                    wav,
+                    minimum_frequency=min_freq,
+                    maximum_frequency=max_freq,
+                    minimum_note_length=80,
+                )
+                events = []
+                for event in note_events:
+                    start, end, pitch, amplitude = event[:4]
+                    events.append({
+                        "start": float(start),
+                        "end": float(end),
+                        "midi": int(pitch),
+                        "confidence": float(amplitude),
+                        "name": midi_name(int(pitch)),
+                    })
+                events = reduce_to_melody(events, 60, 96)
+                engine = "basic-pitch-flute-melody-v1"
+                summary = {"playableNotes": len(events)}
         except Exception as e:
             raise HTTPException(500, str(e)) from e
-
-        events = []
-        for event in note_events:
-            start, end, pitch, amplitude = event[:4]
-            events.append({
-                "start": float(start),
-                "end": float(end),
-                "midi": int(pitch),
-                "confidence": float(amplitude),
-                "name": midi_name(int(pitch)),
-            })
-
-        if mode == "arrange" or instrument == "flute":
-            events = reduce_to_melody(events, 60 if instrument == "flute" else 40, 96 if instrument == "flute" else 88)
-        else:
-            events = [e for e in events if e["confidence"] >= 0.22]
-            events.sort(key=lambda e: (e["start"], -e["confidence"]))
-
-        if instrument == "guitar":
-            playable = []
-            for e in events:
-                pos = guitar_position(e["midi"])
-                if pos:
-                    e["guitar"] = pos
-                    playable.append(e)
-            events = playable
 
         midi_path = workdir / "raw.mid"
         midi_data.write(str(midi_path))
         midi_b64 = base64.b64encode(midi_path.read_bytes()).decode("ascii")
-        duration = max((e["end"] for e in events), default=0.0)
+        detected_duration = max((e["end"] for e in events), default=0.0)
+        duration = float(requested_duration_seconds or detected_duration)
 
         warnings = (
             [
                 "Automatic transcription is approximate, especially on dense full mixes.",
-                "Guitar TAB fingering is an MVP heuristic and is not yet optimized for hand position or chords.",
+                "Guitar uses the v1.1 multi-pass teaching-note gate; mixed recordings may still include harmonics or other instruments.",
             ]
             if instrument == "guitar"
             else ["Flute mode extracts an approximate monophonic melody and may need manual correction."]
@@ -204,8 +320,21 @@ async def transcribe(
             midi_base64=midi_b64,
         )
 
-        # Backward-compatible fields keep the current extension renderer working while
-        # MusicDocument becomes the canonical object for all new features.
+        diagnostic = diagnostic_row(
+            youtube_video_id=youtube_video_id,
+            youtube_url=youtube_url,
+            title=title,
+            source="chrome-extension",
+            instrument=instrument,
+            duration=duration,
+            engine=engine,
+            summary=summary,
+            start_seconds=start_seconds,
+            end_seconds=end_seconds,
+            requested_duration_seconds=requested_duration_seconds,
+        )
+        diagnostic_status = record_diagnostic(diagnostic)
+
         return {
             "title": title,
             "instrument": instrument,
@@ -215,6 +344,20 @@ async def transcribe(
             "midi_base64": midi_b64,
             "warnings": warnings,
             "music_document": document,
+            "engine": engine,
+            "summary": summary,
+            "benchmark": {
+                "videoId": youtube_video_id,
+                "videoUrl": youtube_url,
+                "startSeconds": start_seconds,
+                "endSeconds": end_seconds,
+                "requestedDurationSeconds": requested_duration_seconds,
+            } if youtube_video_id else None,
+            "diagnostic": {
+                "local_file": str(DIAGNOSTICS_PATH),
+                "supabase_status": diagnostic_status.get("supabase_status"),
+                "supabase_error": diagnostic_status.get("supabase_error"),
+            },
         }
 
 

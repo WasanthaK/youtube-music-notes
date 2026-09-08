@@ -15,6 +15,14 @@ const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 const midiName = midi => `${NOTE_NAMES[midi % 12]}${Math.floor(midi / 12) - 1}`;
 const perSecond = (count, duration) => duration > 0 ? count / duration : 0;
 
+async function reportProgress(captureMessage) {
+  try {
+    await chrome.runtime.sendMessage({ type: 'ANALYSIS_PROGRESS', captureMessage });
+  } catch {
+    // Progress display is best-effort; analysis should continue even if popup/service worker is restarting.
+  }
+}
+
 async function beginRecording(message) {
   if (recorder?.state === 'recording') throw new Error('A recording is already in progress.');
   captureMeta = message;
@@ -92,17 +100,14 @@ async function analyseBlob(blob) {
   const onsets = [];
   const contours = [];
 
-  await chrome.storage.local.set({
-    captureState: 'analysing',
-    captureMessage: 'Analysing 30-second sample locally in Chrome…'
-  });
+  await reportProgress('Analysing 30-second sample locally in Chrome…');
 
   await basicPitch.evaluateModel(
     audioBuffer,
     (f, o, c) => { frames.push(...f); onsets.push(...o); contours.push(...c); },
-    async progress => {
+    progress => {
       const pct = Math.round(progress * 100);
-      await chrome.storage.local.set({ captureMessage: `Analysing locally… ${pct}%` });
+      void reportProgress(`Analysing locally… ${pct}%`);
     }
   );
 

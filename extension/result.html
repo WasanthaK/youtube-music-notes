@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Music Note Chart</title>
+  <link rel="stylesheet" href="result.css" />
+</head>
+<body>
+  <header>
+    <div>
+      <h1 id="title">Music Note Chart</h1>
+      <p id="meta"></p>
+    </div>
+    <div class="actions">
+      <button id="downloadMidi">Download MIDI</button>
+      <button id="downloadJson">Download JSON</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2 id="chartTitle">Notation</h2>
+      <div id="chart"></div>
+    </section>
+
+    <section class="card">
+      <h2>Detected notes</h2>
+      <div class="tableWrap">
+        <table>
+          <thead><tr><th>Time</th><th>Note</th><th>Duration</th><th>Confidence</th><th id="extraHead">Position</th></tr></thead>
+          <tbody id="notesBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script src="result.js"></script>
+</body>
+</html>

@@ -1,10 +1,18 @@
 {
   "manifest_version": 3,
   "name": "YouTube Music Notes",
-  "version": "0.2.0",
-  "description": "Capture an exact YouTube segment and create a playable note chart for guitar or flute.",
+  "version": "0.3.0",
+  "description": "Capture a 30-second YouTube sample and transcribe it locally in Chrome with Guitar Engine v1.1.",
   "permissions": ["activeTab", "tabCapture", "offscreen", "storage", "tabs", "scripting"],
-  "host_permissions": ["https://www.youtube.com/*", "https://music.youtube.com/*", "http://127.0.0.1:8765/*", "http://localhost:8765/*"],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://music.youtube.com/*",
+    "https://unpkg.com/*",
+    "https://kgoowanohmtprbwdokjd.supabase.co/*"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+  },
   "background": {
     "service_worker": "service_worker.js",
     "type": "module"

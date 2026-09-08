@@ -1,14 +1,36 @@
 const OFFSCREEN_URL = 'offscreen.html';
 let autoStopTimer = null;
 
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+async function sendToOffscreen(message, attempts = 30, delayMs = 100) {
+  let lastError = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await chrome.runtime.sendMessage(message);
+    } catch (error) {
+      lastError = error;
+      const text = error?.message || String(error);
+      if (!text.includes('Receiving end does not exist')) throw error;
+      await sleep(delayMs);
+    }
+  }
+  throw new Error(`Offscreen transcription engine did not become ready: ${lastError?.message || lastError || 'unknown error'}`);
+}
+
 async function ensureOffscreen() {
   const contexts = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
-  if (contexts.some(c => c.documentUrl.endsWith(OFFSCREEN_URL))) return;
-  await chrome.offscreen.createDocument({
-    url: OFFSCREEN_URL,
-    reasons: ['USER_MEDIA'],
-    justification: 'Capture the current tab audio after the user starts music transcription.'
-  });
+  if (!contexts.some(c => c.documentUrl.endsWith(OFFSCREEN_URL))) {
+    await chrome.offscreen.createDocument({
+      url: OFFSCREEN_URL,
+      reasons: ['USER_MEDIA'],
+      justification: 'Capture the current tab audio after the user starts music transcription.'
+    });
+  }
+
+  // createDocument() can resolve before the bundle has registered its runtime listener.
+  // PING with retry makes capture deterministic instead of racing extension startup.
+  await sendToOffscreen({ target: 'offscreen', type: 'PING' });
 }
 
 async function activeTab() {
@@ -95,7 +117,8 @@ async function stopCapture(tabId = null) {
   }
   if (tabId) await pauseYouTube(tabId);
   await chrome.storage.local.set({ captureState: 'analysing', captureMessage: 'Analysing exact YouTube segment…' });
-  await chrome.runtime.sendMessage({ target: 'offscreen', type: 'END_RECORDING' });
+  await ensureOffscreen();
+  await sendToOffscreen({ target: 'offscreen', type: 'END_RECORDING' });
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -135,7 +158,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         captureBenchmark: benchmark
       });
 
-      await chrome.runtime.sendMessage({
+      await sendToOffscreen({
         target: 'offscreen',
         type: 'BEGIN_RECORDING',
         streamId,
@@ -167,7 +190,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       await ensureOffscreen();
       const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
       await chrome.storage.local.set({ captureState: 'recording', captureMessage: 'Recording tab audio… play the section you want.' });
-      await chrome.runtime.sendMessage({
+      await sendToOffscreen({
         target: 'offscreen',
         type: 'BEGIN_RECORDING',
         streamId,

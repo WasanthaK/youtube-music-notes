@@ -1,6 +1,7 @@
 import './styles.css';
 import { BasicPitch, addPitchBendsToNoteEvents, noteFramesToTime, outputToNotesPoly } from '@spotify/basic-pitch';
 import { createClient } from '@supabase/supabase-js';
+import { buildGuitarTranscription, renderGuitarTab } from './guitarEngine.js';
 
 const MODEL_URL = 'https://unpkg.com/@spotify/basic-pitch@1.0.1/model/model.json';
 const SUPABASE_URL = 'https://kgoowanohmtprbwdokjd.supabase.co';
@@ -16,34 +17,46 @@ const state = {
   notes: [],
   instrument: 'guitar',
   session: null,
+  engineSummary: null,
 };
 
 const noteNames = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-const guitarOpen = [40,45,50,55,59,64];
 
-function midiName(midi){ return `${noteNames[midi%12]}${Math.floor(midi/12)-1}`; }
-function guitarPosition(midi){
-  const candidates = guitarOpen.map((open,i)=>({string:i+1,fret:midi-open})).filter(x=>x.fret>=0&&x.fret<=20);
-  candidates.sort((a,b)=>a.fret-b.fret || b.string-a.string);
-  return candidates[0] || null;
-}
+function midiName(midi){ return `${noteNames[midi % 12]}${Math.floor(midi / 12) - 1}`; }
+
 function reduceMelody(notes,min,max){
-  const filtered = notes.filter(n=>n.midi>=min&&n.midi<=max&&n.confidence>=0.18).sort((a,b)=>a.start-b.start||b.midi-a.midi);
+  const filtered = notes
+    .filter(n => n.midi >= min && n.midi <= max && n.confidence >= 0.18)
+    .sort((a,b) => a.start - b.start || b.midi - a.midi);
   const out=[];
   for(const n of filtered){
-    if(!out.length || n.start-out[out.length-1].start>0.09) out.push(n);
-    else if(n.confidence>out[out.length-1].confidence) out[out.length-1]=n;
+    if(!out.length || n.start - out[out.length-1].start > 0.09) out.push(n);
+    else if(n.confidence > out[out.length-1].confidence) out[out.length-1] = n;
   }
   return out;
 }
-function buildDocument(title,instrument,notes,duration,source='browser-tab-capture'){
+
+function buildDocument(title,instrument,notes,duration,source='browser-tab-capture',engineSummary=null){
   return {
-    schema:'youtube-music-notes.music-document',schema_version:'0.1.0',
+    schema:'youtube-music-notes.music-document',
+    schema_version:'0.1.0',
     track:{title,source,duration_seconds:duration},
-    analysis:{requested_instrument:instrument,mode:'arrange',confidence_summary:null,warnings:['Browser transcription is approximate on dense mixes.']},
-    tempo:{bpm:null,confidence:null},meter:{time_signature:null,confidence:null},key:{tonic:null,mode:null,confidence:null},
-    sections:[],measures:[],chords:[],instruments:[{name:instrument,role:'target',source:'arranged'}],notes,
-    exports:{midi_base64:null},learning:{difficulty:null,skills:[],practice_points:[]}
+    analysis:{
+      requested_instrument:instrument,
+      mode:'arrange',
+      confidence_summary:engineSummary,
+      warnings:['Automatic transcription is approximate on dense mixes. Instrument-isolated audio generally improves accuracy.']
+    },
+    tempo:{bpm:null,confidence:null},
+    meter:{time_signature:null,confidence:null},
+    key:{tonic:null,mode:null,confidence:null},
+    sections:[],
+    measures:[],
+    chords:[],
+    instruments:[{name:instrument,role:'target',source:'arranged'}],
+    notes,
+    exports:{midi_base64:null},
+    learning:{difficulty:null,skills:[],practice_points:[]}
   };
 }
 
@@ -76,7 +89,7 @@ function app(){
             <div class="field"><label>Track title</label><input id="title" value="Captured song" /></div>
           </div>
           ${captureControls()}
-          <p class="muted">Transcription runs locally in your browser and does not use your AI allowance.</p>
+          <p class="muted">Guitar now uses an adaptive multi-pass detector that preserves chords and scores note confidence. Transcription runs locally and does not use your AI allowance.</p>
         </div>
 
         <div class="card"><h2>2. AI music teacher</h2>
@@ -130,22 +143,23 @@ async function socialSignIn(provider){
   if(error) document.querySelector('#answer').textContent=`Sign-in error: ${error.message}`;
 }
 
-function renderGuitar(notes){
-  const lines=[['e'],['B'],['G'],['D'],['A'],['E']].map(x=>x[0]+'|');
-  notes.slice(0,80).forEach(n=>{
-    const p=n.guitar; if(!p) return;
-    const idx=6-p.string; const token=String(p.fret).padEnd(3,'-');
-    for(let i=0;i<6;i++) lines[i]+=i===idx?token:'---';
-  });
-  return `<pre>${lines.join('\n')}</pre>`;
-}
 function renderFlute(notes){
   const rows = notes.slice(0,120).map(n=>`<tr><td>${n.start.toFixed(2)}s</td><td>${n.name}</td><td>${(n.end-n.start).toFixed(2)}s</td><td>${Math.round(n.confidence*100)}%</td></tr>`).join('');
   return `<table class="note-table"><thead><tr><th>Time</th><th>Note</th><th>Length</th><th>Confidence</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
+
 function render(){
   const score=document.querySelector('#score');
-  score.innerHTML = state.instrument==='guitar' ? renderGuitar(state.notes) : renderFlute(state.notes);
+  if(state.instrument === 'guitar'){
+    const tab = renderGuitarTab(state.notes);
+    const summary = state.engineSummary;
+    const quality = summary
+      ? `<div class="muted">Engine: guitar-basic-pitch-ensemble-v1 · ${summary.playableNotes} playable notes · ${summary.onsetGroups} onset groups · ${Math.round(summary.averageConfidence*100)}% average confidence · ${summary.uncertain} uncertain</div>`
+      : '';
+    score.innerHTML = `${quality}<pre>${tab}</pre>`;
+  } else {
+    score.innerHTML = renderFlute(state.notes);
+  }
   document.querySelector('#download').disabled=!state.musicDocument;
 }
 
@@ -154,12 +168,33 @@ async function decodeToMono22050(blob){
   try{
     const input=await ctx.decodeAudioData(await blob.arrayBuffer());
     const offline=new OfflineAudioContext(1,Math.ceil(input.duration*22050),22050);
-    const src=offline.createBufferSource(); src.buffer=input; src.connect(offline.destination); src.start();
-    const rendered=await offline.startRendering();
-    return rendered;
+    const src=offline.createBufferSource();
+    src.buffer=input;
+    src.connect(offline.destination);
+    src.start();
+    return await offline.startRendering();
   } finally {
     await ctx.close();
   }
+}
+
+function buildFluteTranscription(frames,onsets,contours){
+  const timedNotes = noteFramesToTime(
+    addPitchBendsToNoteEvents(
+      contours,
+      outputToNotesPoly(frames,onsets,0.25,0.25,5)
+    )
+  );
+  let notes=timedNotes.map(n=>({
+    start:n.startTimeSeconds,
+    end:n.startTimeSeconds+n.durationSeconds,
+    midi:n.pitchMidi,
+    confidence:n.amplitude,
+    name:midiName(n.pitchMidi)
+  }));
+  const rawCount=notes.length;
+  notes=reduceMelody(notes,60,96);
+  return {notes,summary:{rawCount,playableNotes:notes.length}};
 }
 
 async function transcribe(blob, source='browser-tab-capture'){
@@ -169,24 +204,40 @@ async function transcribe(blob, source='browser-tab-capture'){
     const audioBuffer=await decodeToMono22050(blob);
     if(status) status.textContent='Loading transcription model…';
     const basicPitch=new BasicPitch(MODEL_URL);
-    const frames=[]; const onsets=[]; const contours=[];
+    const frames=[];
+    const onsets=[];
+    const contours=[];
     if(status) status.textContent='Analysing notes in browser…';
-    await basicPitch.evaluateModel(audioBuffer,(f,o,c)=>{frames.push(...f);onsets.push(...o);contours.push(...c);},p=>{if(status) status.textContent=`Analysing notes… ${Math.round(p*100)}%`;});
-
-    const timedNotes = noteFramesToTime(
-      addPitchBendsToNoteEvents(
-        contours,
-        outputToNotesPoly(frames,onsets,0.25,0.25,5)
-      )
+    await basicPitch.evaluateModel(
+      audioBuffer,
+      (f,o,c)=>{frames.push(...f);onsets.push(...o);contours.push(...c);},
+      p=>{if(status) status.textContent=`Analysing notes… ${Math.round(p*100)}%`;}
     );
-    let notes=timedNotes.map(n=>({start:n.startTimeSeconds,end:n.startTimeSeconds+n.durationSeconds,midi:n.pitchMidi,confidence:n.amplitude,name:midiName(n.pitchMidi)}));
-    const rawCount=notes.length;
+
     state.instrument=document.querySelector('#instrument').value;
-    notes=reduceMelody(notes,state.instrument==='flute'?60:40,state.instrument==='flute'?96:88);
-    if(state.instrument==='guitar') notes=notes.map(n=>({...n,guitar:guitarPosition(n.midi)})).filter(n=>n.guitar);
-    state.notes=notes;
-    state.musicDocument=buildDocument(document.querySelector('#title').value,state.instrument,notes,audioBuffer.duration,source);
-    if(status) status.textContent=`Done: ${rawCount} notes detected by the model; ${notes.length} playable ${state.instrument} notes arranged.`;
+    if(state.instrument === 'guitar'){
+      const result = buildGuitarTranscription(frames,onsets,contours);
+      state.notes = result.notes.map(note=>({...note,name:midiName(note.midi)}));
+      state.engineSummary = result.summary;
+      if(status){
+        const s=result.summary;
+        status.textContent=`Done: strict ${s.rawByPass.strict}, balanced ${s.rawByPass.balanced}, sensitive ${s.rawByPass.sensitive}; ${s.mergedCandidates} merged candidates → ${s.playableNotes} playable guitar notes in ${s.onsetGroups} onset groups. ${s.uncertain} uncertain.`;
+      }
+    } else {
+      const result=buildFluteTranscription(frames,onsets,contours);
+      state.notes=result.notes;
+      state.engineSummary=result.summary;
+      if(status) status.textContent=`Done: ${result.summary.rawCount} notes detected; ${result.summary.playableNotes} flute melody notes retained.`;
+    }
+
+    state.musicDocument=buildDocument(
+      document.querySelector('#title').value,
+      state.instrument,
+      state.notes,
+      audioBuffer.duration,
+      source,
+      state.engineSummary
+    );
     render();
   } catch(e){
     const message = isIOS
@@ -201,19 +252,29 @@ async function startCapture(){
   try{
     const stream=await navigator.mediaDevices.getDisplayMedia({video:true,audio:true});
     if(!stream.getAudioTracks().length) throw new Error('No tab audio was shared. Select a browser tab and enable “Share tab audio”.');
-    state.stream=stream; state.chunks=[];
+    state.stream=stream;
+    state.chunks=[];
     const audioOnly=new MediaStream(stream.getAudioTracks());
-    const rec=new MediaRecorder(audioOnly,{mimeType:MediaRecorder.isTypeSupported('audio/webm;codecs=opus')?'audio/webm;codecs=opus':'audio/webm'});
-    state.recorder=rec; rec.ondataavailable=e=>{if(e.data.size) state.chunks.push(e.data);};
-    rec.start(1000); document.querySelector('#start').disabled=true; document.querySelector('#stop').disabled=false;
+    const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+    const rec=new MediaRecorder(audioOnly,{mimeType:mime});
+    state.recorder=rec;
+    rec.ondataavailable=e=>{if(e.data.size) state.chunks.push(e.data);};
+    rec.start(1000);
+    document.querySelector('#start').disabled=true;
+    document.querySelector('#stop').disabled=false;
     status.textContent='Recording tab audio…';
     stream.getVideoTracks().forEach(t=>t.onended=()=>stopCapture());
   }catch(e){status.textContent=e.message;}
 }
+
 async function stopCapture(){
   if(!state.recorder || state.recorder.state==='inactive') return;
-  const done=new Promise(resolve=>state.recorder.addEventListener('stop',resolve,{once:true})); state.recorder.stop(); await done;
-  state.stream?.getTracks().forEach(t=>t.stop()); document.querySelector('#start').disabled=false; document.querySelector('#stop').disabled=true;
+  const done=new Promise(resolve=>state.recorder.addEventListener('stop',resolve,{once:true}));
+  state.recorder.stop();
+  await done;
+  state.stream?.getTracks().forEach(t=>t.stop());
+  document.querySelector('#start').disabled=false;
+  document.querySelector('#stop').disabled=true;
   await transcribe(new Blob(state.chunks,{type:'audio/webm'}));
 }
 
@@ -265,7 +326,12 @@ if(isIOS){
 }
 document.querySelector('#ask').onclick=askAI;
 document.querySelectorAll('#quick button').forEach(b=>b.onclick=()=>document.querySelector('#question').value=b.textContent);
-document.querySelector('#download').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(state.musicDocument,null,2)],{type:'application/json'}));a.download='music-document.json';a.click();};
+document.querySelector('#download').onclick=()=>{
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([JSON.stringify(state.musicDocument,null,2)],{type:'application/json'}));
+  a.download='music-document.json';
+  a.click();
+};
 
 const { data:{ session } } = await supabase.auth.getSession();
 state.session=session;

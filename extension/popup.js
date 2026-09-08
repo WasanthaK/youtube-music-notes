@@ -3,6 +3,17 @@ const stopBtn = document.querySelector('#stop');
 const statusEl = document.querySelector('#status');
 const instrumentEl = document.querySelector('#instrument');
 const modeEl = document.querySelector('#mode');
+const startTimeEl = document.querySelector('#startTime');
+const endTimeEl = document.querySelector('#endTime');
+
+function parseTime(value) {
+  const text = String(value || '').trim();
+  if (!text) return NaN;
+  if (/^\d+(?:\.\d+)?$/.test(text)) return Number(text);
+  const parts = text.split(':').map(Number);
+  if (parts.some(Number.isNaN) || parts.length > 3) return NaN;
+  return parts.reduce((total, part) => total * 60 + part, 0);
+}
 
 async function refreshState() {
   const { captureState = 'idle', captureMessage = 'Ready.' } = await chrome.storage.local.get(['captureState', 'captureMessage']);
@@ -12,13 +23,23 @@ async function refreshState() {
 }
 
 startBtn.addEventListener('click', async () => {
-  statusEl.textContent = 'Starting tab capture…';
+  const startSeconds = parseTime(startTimeEl.value);
+  const endSeconds = parseTime(endTimeEl.value);
+
+  if (!Number.isFinite(startSeconds) || !Number.isFinite(endSeconds) || startSeconds < 0 || endSeconds <= startSeconds) {
+    statusEl.textContent = 'Enter a valid start and end, for example 0:30 to 1:15.';
+    return;
+  }
+
+  statusEl.textContent = `Preparing ${startTimeEl.value} → ${endTimeEl.value}…`;
   const response = await chrome.runtime.sendMessage({
-    type: 'START_CAPTURE',
+    type: 'START_SEGMENT_CAPTURE',
     instrument: instrumentEl.value,
-    mode: modeEl.value
+    mode: modeEl.value,
+    startSeconds,
+    endSeconds
   });
-  if (!response?.ok) statusEl.textContent = response?.error || 'Could not start capture.';
+  if (!response?.ok) statusEl.textContent = response?.error || 'Could not start segment capture.';
   await refreshState();
 });
 

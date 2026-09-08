@@ -46,6 +46,12 @@ async function endRecording() {
   form.append('mode', captureMeta.mode);
   form.append('title', captureMeta.title || 'Captured audio');
 
+  if (captureMeta.videoId) form.append('youtube_video_id', captureMeta.videoId);
+  if (captureMeta.videoUrl) form.append('youtube_url', captureMeta.videoUrl);
+  if (Number.isFinite(captureMeta.startSeconds)) form.append('start_seconds', String(captureMeta.startSeconds));
+  if (Number.isFinite(captureMeta.endSeconds)) form.append('end_seconds', String(captureMeta.endSeconds));
+  if (Number.isFinite(captureMeta.requestedDurationSeconds)) form.append('requested_duration_seconds', String(captureMeta.requestedDurationSeconds));
+
   const response = await fetch('http://127.0.0.1:8765/transcribe', { method: 'POST', body: form });
   if (!response.ok) {
     const body = await response.text();
@@ -53,7 +59,19 @@ async function endRecording() {
   }
 
   const result = await response.json();
-  await chrome.runtime.sendMessage({ type: 'ANALYSIS_READY', result });
+  await chrome.runtime.sendMessage({
+    type: 'ANALYSIS_READY',
+    result: {
+      ...result,
+      benchmark: captureMeta.videoId ? {
+        videoId: captureMeta.videoId,
+        videoUrl: captureMeta.videoUrl,
+        startSeconds: captureMeta.startSeconds,
+        endSeconds: captureMeta.endSeconds,
+        requestedDurationSeconds: captureMeta.requestedDurationSeconds
+      } : null
+    }
+  });
 
   chunks = [];
   recorder = null;

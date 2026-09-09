@@ -1,7 +1,22 @@
 const OFFSCREEN_URL = 'offscreen.html';
 let autoStopTimer = null;
+let captureState = 'idle';
+let captureMessage = 'Ready.';
+let captureBenchmark = null;
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+function statePayload() {
+  return { captureState, captureMessage };
+}
+
+async function setState(state, message) {
+  captureState = state;
+  captureMessage = message;
+  try {
+    await chrome.runtime.sendMessage({ type: 'STATE_CHANGED', ...statePayload() });
+  } catch {}
+}
 
 async function sendToOffscreen(message, attempts = 30, delayMs = 100) {
   let lastError = null;
@@ -27,7 +42,6 @@ async function ensureOffscreen() {
       justification: 'Capture the current tab audio after the user starts music transcription.'
     });
   }
-
   await sendToOffscreen({ target: 'offscreen', type: 'PING' });
 }
 
@@ -52,17 +66,14 @@ async function prepareYouTubeSegment(tabId, startSeconds) {
     func: async start => {
       const video = document.querySelector('video');
       if (!video) throw new Error('No YouTube video element found on this page.');
-
       if (video.readyState < 1) {
         await new Promise((resolve, reject) => {
           const timer = setTimeout(() => reject(new Error('Timed out waiting for YouTube video metadata.')), 8000);
           video.addEventListener('loadedmetadata', () => { clearTimeout(timer); resolve(); }, { once: true });
         });
       }
-
       video.pause();
       video.playbackRate = 1;
-
       if (Math.abs(video.currentTime - start) > 0.2) {
         video.currentTime = start;
         await new Promise((resolve, reject) => {
@@ -70,16 +81,10 @@ async function prepareYouTubeSegment(tabId, startSeconds) {
           video.addEventListener('seeked', () => { clearTimeout(timer); resolve(); }, { once: true });
         });
       }
-
-      return {
-        currentTime: video.currentTime,
-        duration: video.duration,
-        title: document.title
-      };
+      return { currentTime: video.currentTime, duration: video.duration, title: document.title };
     },
     args: [startSeconds]
   });
-
   return result;
 }
 
@@ -91,7 +96,6 @@ async function playYouTube(tabId) {
       if (!video) throw new Error('No YouTube video element found.');
       video.playbackRate = 1;
       await video.play();
-      return video.currentTime;
     }
   });
 }
@@ -100,10 +104,7 @@ async function pauseYouTube(tabId) {
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
-      func: () => {
-        const video = document.querySelector('video');
-        if (video) video.pause();
-      }
+      func: () => { document.querySelector('video')?.pause(); }
     });
   } catch {}
 }
@@ -114,13 +115,18 @@ async function stopCapture(tabId = null) {
     autoStopTimer = null;
   }
   if (tabId) await pauseYouTube(tabId);
-  await chrome.storage.local.set({ captureState: 'analysing', captureMessage: 'Analysing exact YouTube segment…' });
+  await setState('analysing', 'Analysing exact YouTube segment…');
   await ensureOffscreen();
   await sendToOffscreen({ target: 'offscreen', type: 'END_RECORDING' });
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
+    if (message.type === 'GET_STATE') {
+      sendResponse({ ok: true, ...statePayload() });
+      return;
+    }
+
     if (message.type === 'START_SEGMENT_CAPTURE') {
       const tab = await activeTab();
       const videoId = youtubeVideoId(tab.url || '');
@@ -141,7 +147,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       await ensureOffscreen();
       const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
       const segmentSeconds = endSeconds - startSeconds;
-      const benchmark = {
+      captureBenchmark = {
         mode: benchmarkMode,
         videoId,
         videoUrl: `https://www.youtube.com/watch?v=${videoId}`,
@@ -150,11 +156,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         requestedDurationSeconds: segmentSeconds
       };
 
-      await chrome.storage.local.set({
-        captureState: 'recording',
-        captureMessage: `Recording YouTube ${videoId}: ${startSeconds.toFixed(1)}s → ${endSeconds.toFixed(1)}s (${segmentSeconds.toFixed(1)}s)…`,
-        captureBenchmark: benchmark
-      });
+      await setState('recording', `Recording YouTube ${videoId}: ${startSeconds.toFixed(1)}s → ${endSeconds.toFixed(1)}s (${segmentSeconds.toFixed(1)}s)…`);
 
       await sendToOffscreen({
         target: 'offscreen',
@@ -165,21 +167,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         title: tab.title || prepared?.title || 'Captured audio',
         benchmarkMode,
         videoId,
-        videoUrl: benchmark.videoUrl,
+        videoUrl: captureBenchmark.videoUrl,
         startSeconds,
         endSeconds,
         requestedDurationSeconds: segmentSeconds
       });
 
       await playYouTube(tab.id);
-
       autoStopTimer = setTimeout(() => {
-        stopCapture(tab.id).catch(async err => {
-          await chrome.storage.local.set({ captureState: 'error', captureMessage: err.message || String(err) });
-        });
+        stopCapture(tab.id).catch(err => setState('error', err.message || String(err)));
       }, Math.ceil(segmentSeconds * 1000));
 
-      sendResponse({ ok: true, ...benchmark });
+      sendResponse({ ok: true, ...captureBenchmark });
       return;
     }
 
@@ -187,7 +186,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const tab = await activeTab();
       await ensureOffscreen();
       const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
-      await chrome.storage.local.set({ captureState: 'recording', captureMessage: 'Recording tab audio… play the section you want.' });
+      captureBenchmark = null;
+      await setState('recording', 'Recording tab audio… play the section you want.');
       await sendToOffscreen({
         target: 'offscreen',
         type: 'BEGIN_RECORDING',
@@ -208,38 +208,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message.type === 'ANALYSIS_PROGRESS') {
-      await chrome.storage.local.set({
-        captureState: 'analysing',
-        captureMessage: message.captureMessage || 'Analysing locally…'
-      });
+      await setState('analysing', message.captureMessage || 'Analysing locally…');
       sendResponse({ ok: true });
       return;
     }
 
     if (message.type === 'ANALYSIS_READY') {
-      const { captureBenchmark = null } = await chrome.storage.local.get('captureBenchmark');
-      await chrome.storage.local.set({
-        captureState: 'done',
-        captureMessage: `Done: ${message.result.notes?.length || 0} notes detected.`,
-        analysisResult: {
-          ...message.result,
-          benchmark: captureBenchmark || message.result.benchmark || null
-        }
-      });
+      const count = message.result?.notes?.length || 0;
+      await setState('done', `Done: ${count} notes detected.`);
       await chrome.tabs.create({ url: chrome.runtime.getURL('result.html') });
       sendResponse({ ok: true });
       return;
     }
 
     if (message.type === 'ANALYSIS_ERROR') {
-      await chrome.storage.local.set({ captureState: 'error', captureMessage: message.error || 'Analysis failed.' });
+      await setState('error', message.error || 'Analysis failed.');
       sendResponse({ ok: true });
       return;
     }
 
     sendResponse({ ok: false, error: 'Unknown message.' });
-  })().catch(async (err) => {
-    await chrome.storage.local.set({ captureState: 'error', captureMessage: err.message || String(err) });
+  })().catch(async err => {
+    await setState('error', err.message || String(err));
     sendResponse({ ok: false, error: err.message || String(err) });
   });
   return true;

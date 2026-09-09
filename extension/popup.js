@@ -7,11 +7,19 @@ const modeEl = document.querySelector('#mode');
 const BENCHMARK_START_SECONDS = 30;
 const BENCHMARK_END_SECONDS = 60;
 
-async function refreshState() {
-  const { captureState = 'idle', captureMessage = 'Ready.' } = await chrome.storage.local.get(['captureState', 'captureMessage']);
+function applyState(captureState = 'idle', captureMessage = 'Ready.') {
   statusEl.textContent = captureMessage;
   startBtn.disabled = captureState === 'recording' || captureState === 'analysing';
   stopBtn.disabled = captureState !== 'recording';
+}
+
+async function refreshState() {
+  try {
+    const response = await chrome.runtime.sendMessage({ type: 'GET_STATE' });
+    applyState(response?.captureState, response?.captureMessage);
+  } catch (error) {
+    applyState('error', error?.message || String(error));
+  }
 }
 
 startBtn.addEventListener('click', async () => {
@@ -35,8 +43,8 @@ stopBtn.addEventListener('click', async () => {
   await refreshState();
 });
 
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && (changes.captureState || changes.captureMessage)) refreshState();
+chrome.runtime.onMessage.addListener(message => {
+  if (message.type === 'STATE_CHANGED') applyState(message.captureState, message.captureMessage);
 });
 
 refreshState();

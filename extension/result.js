@@ -10,10 +10,13 @@ let masterGain = null;
 let schedulerTimer = null;
 let uiTimer = null;
 let playbackStartedAt = 0;
-let playbackDuration = 0;
+let playbackSourceDuration = 0;
+let playbackRate = 1;
 let playbackNotes = [];
 let nextNoteIndex = 0;
 let activeSources = new Set();
+let guitarWave = null;
+let pluckNoiseBuffer = null;
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -126,77 +129,177 @@ function renderTable(notes, instrument) {
   });
 }
 
-function scheduleSynthNote(note, when, windowEndSeconds) {
+function buildGuitarWave(ctx) {
+  const real = new Float32Array(10);
+  const imag = new Float32Array(10);
+  imag[1] = 1.00;
+  imag[2] = 0.58;
+  imag[3] = 0.34;
+  imag[4] = 0.23;
+  imag[5] = 0.15;
+  imag[6] = 0.10;
+  imag[7] = 0.065;
+  imag[8] = 0.04;
+  imag[9] = 0.025;
+  return ctx.createPeriodicWave(real, imag, { disableNormalization: false });
+}
+
+function buildPluckNoise(ctx) {
+  const length = Math.max(64, Math.floor(ctx.sampleRate * 0.035));
+  const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < length; i++) {
+    const decay = Math.pow(1 - i / length, 2.2);
+    data[i] = (Math.random() * 2 - 1) * decay;
+  }
+  return buffer;
+}
+
+function registerSource(source) {
+  activeSources.add(source);
+  source.addEventListener('ended', () => activeSources.delete(source), { once: true });
+}
+
+function scheduleGuitarNote(note, when, sourceWindowEndSeconds) {
   if (!audioContext || !masterGain) return;
 
   const frequency = midiToFrequency(note.midi);
-  const remaining = Math.max(0.05, windowEndSeconds - note.start);
-  const sourceDuration = Math.max(0.08, Math.min(note.end - note.start, remaining, 2.4));
-  const audibleDuration = Math.max(0.12, Math.min(sourceDuration, 1.8));
+  const sourceRemaining = Math.max(0.04, sourceWindowEndSeconds - note.start);
+  const sourceDuration = Math.max(0.05, Math.min(note.end - note.start, sourceRemaining, 2.6));
+  const wallDuration = sourceDuration / playbackRate;
+  const releaseTail = Math.min(0.24 / playbackRate, 0.34);
+  const audibleDuration = Math.max(0.16, Math.min(wallDuration + releaseTail, 2.9));
   const confidence = Math.max(0, Math.min(1, note.confidence ?? 0.5));
+  const stringNumber = Number(note.guitar?.string || 3.5);
+  const stringBrightness = 0.78 + (6 - stringNumber) * 0.065;
 
   const oscillator = audioContext.createOscillator();
-  oscillator.type = result?.instrument === 'guitar' ? 'triangle' : 'sine';
+  oscillator.setPeriodicWave(guitarWave || buildGuitarWave(audioContext));
   oscillator.frequency.setValueAtTime(frequency, when);
 
   const filter = audioContext.createBiquadFilter();
   filter.type = 'lowpass';
-  filter.frequency.setValueAtTime(result?.instrument === 'guitar' ? 2400 : 4200, when);
-  filter.Q.setValueAtTime(0.7, when);
+  const cutoff = Math.max(1300, Math.min(5200, frequency * 8.5 * stringBrightness));
+  filter.frequency.setValueAtTime(cutoff, when);
+  filter.frequency.exponentialRampToValueAtTime(Math.max(850, cutoff * 0.58), when + Math.min(0.28, audibleDuration * 0.55));
+  filter.Q.setValueAtTime(0.72, when);
+
+  const body = audioContext.createBiquadFilter();
+  body.type = 'peaking';
+  body.frequency.setValueAtTime(190 + (6 - stringNumber) * 18, when);
+  body.Q.setValueAtTime(1.1, when);
+  body.gain.setValueAtTime(2.4, when);
 
   const gain = audioContext.createGain();
-  const peak = 0.028 + confidence * 0.035;
+  const peak = 0.018 + confidence * 0.026;
+  const sustain = Math.max(0.0035, peak * 0.22);
+  const releaseStart = Math.max(when + 0.055, when + Math.min(wallDuration, audibleDuration - 0.08));
   gain.gain.setValueAtTime(0.0001, when);
-  gain.gain.exponentialRampToValueAtTime(peak, when + 0.008);
-  gain.gain.exponentialRampToValueAtTime(Math.max(0.008, peak * 0.35), when + Math.min(0.18, audibleDuration * 0.45));
+  gain.gain.exponentialRampToValueAtTime(peak, when + 0.004);
+  gain.gain.exponentialRampToValueAtTime(Math.max(0.006, peak * 0.42), when + Math.min(0.075, audibleDuration * 0.35));
+  gain.gain.exponentialRampToValueAtTime(sustain, releaseStart);
   gain.gain.exponentialRampToValueAtTime(0.0001, when + audibleDuration);
 
-  oscillator.connect(filter);
-  filter.connect(gain);
-  gain.connect(masterGain);
+  const panner = audioContext.createStereoPanner();
+  panner.pan.setValueAtTime(Math.max(-0.22, Math.min(0.22, (3.5 - stringNumber) * 0.075)), when);
 
-  activeSources.add(oscillator);
-  oscillator.addEventListener('ended', () => activeSources.delete(oscillator), { once: true });
+  oscillator.connect(filter);
+  filter.connect(body);
+  body.connect(gain);
+  gain.connect(panner);
+  panner.connect(masterGain);
+
   oscillator.start(when);
   oscillator.stop(when + audibleDuration + 0.02);
+  registerSource(oscillator);
+
+  if (pluckNoiseBuffer) {
+    const noise = audioContext.createBufferSource();
+    noise.buffer = pluckNoiseBuffer;
+    const noiseFilter = audioContext.createBiquadFilter();
+    noiseFilter.type = 'bandpass';
+    noiseFilter.frequency.setValueAtTime(Math.max(900, Math.min(5200, frequency * 7)), when);
+    noiseFilter.Q.setValueAtTime(0.9, when);
+    const noiseGain = audioContext.createGain();
+    const noisePeak = 0.006 + confidence * 0.009;
+    noiseGain.gain.setValueAtTime(noisePeak, when);
+    noiseGain.gain.exponentialRampToValueAtTime(0.0001, when + 0.03 / playbackRate);
+    noise.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+    noiseGain.connect(panner);
+    noise.start(when);
+    noise.stop(when + 0.04 / playbackRate);
+    registerSource(noise);
+  }
+}
+
+function scheduleFluteNote(note, when, sourceWindowEndSeconds) {
+  if (!audioContext || !masterGain) return;
+  const frequency = midiToFrequency(note.midi);
+  const sourceRemaining = Math.max(0.05, sourceWindowEndSeconds - note.start);
+  const sourceDuration = Math.max(0.08, Math.min(note.end - note.start, sourceRemaining, 2.4));
+  const audibleDuration = Math.max(0.12, Math.min(sourceDuration / playbackRate, 2.6));
+  const confidence = Math.max(0, Math.min(1, note.confidence ?? 0.5));
+
+  const oscillator = audioContext.createOscillator();
+  oscillator.type = 'sine';
+  oscillator.frequency.setValueAtTime(frequency, when);
+  const gain = audioContext.createGain();
+  const peak = 0.025 + confidence * 0.03;
+  gain.gain.setValueAtTime(0.0001, when);
+  gain.gain.exponentialRampToValueAtTime(peak, when + 0.012);
+  gain.gain.setValueAtTime(Math.max(0.008, peak * 0.6), when + Math.min(0.08, audibleDuration * 0.4));
+  gain.gain.exponentialRampToValueAtTime(0.0001, when + audibleDuration);
+  oscillator.connect(gain);
+  gain.connect(masterGain);
+  oscillator.start(when);
+  oscillator.stop(when + audibleDuration + 0.02);
+  registerSource(oscillator);
+}
+
+function scheduleSynthNote(note, when, sourceWindowEndSeconds) {
+  if (result?.instrument === 'guitar') scheduleGuitarNote(note, when, sourceWindowEndSeconds);
+  else scheduleFluteNote(note, when, sourceWindowEndSeconds);
 }
 
 function updatePlaybackUi() {
-  if (!audioContext || !playbackDuration) return;
-  const elapsed = Math.max(0, audioContext.currentTime - playbackStartedAt);
-  const clamped = Math.min(elapsed, playbackDuration);
-  const pct = playbackDuration > 0 ? (clamped / playbackDuration) * 100 : 0;
-  document.querySelector('#playbackClock').textContent = `${clamped.toFixed(1)}s / ${playbackDuration.toFixed(1)}s`;
+  if (!audioContext || !playbackSourceDuration) return;
+  const wallElapsed = Math.max(0, audioContext.currentTime - playbackStartedAt);
+  const sourceElapsed = Math.min(playbackSourceDuration, wallElapsed * playbackRate);
+  const pct = playbackSourceDuration > 0 ? (sourceElapsed / playbackSourceDuration) * 100 : 0;
+  const rateLabel = playbackRate === 1 ? '' : ` · ${playbackRate.toFixed(2)}×`;
+  document.querySelector('#playbackClock').textContent = `${sourceElapsed.toFixed(1)}s / ${playbackSourceDuration.toFixed(1)}s${rateLabel}`;
   document.querySelector('#playbackProgress').style.width = `${pct}%`;
 
-  const rows = document.querySelectorAll('#notesBody tr.playing');
-  rows.forEach(row => row.classList.remove('playing'));
+  document.querySelectorAll('#notesBody tr.playing').forEach(row => row.classList.remove('playing'));
   const nearby = [...document.querySelectorAll('#notesBody tr[data-start]')]
-    .find(row => Math.abs(Number(row.dataset.start) - clamped) < 0.08);
+    .find(row => Math.abs(Number(row.dataset.start) - sourceElapsed) < 0.08);
   nearby?.classList.add('playing');
 
-  if (elapsed >= playbackDuration + 0.05) stopPlayback(true);
+  if (sourceElapsed >= playbackSourceDuration - 0.001) stopPlayback(true);
 }
 
 function scheduleAhead() {
   if (!audioContext) return;
-  const elapsed = Math.max(0, audioContext.currentTime - playbackStartedAt);
-  const horizon = elapsed + LOOKAHEAD_SECONDS;
+  const wallElapsed = Math.max(0, audioContext.currentTime - playbackStartedAt);
+  const sourceElapsed = wallElapsed * playbackRate;
+  const sourceHorizon = sourceElapsed + LOOKAHEAD_SECONDS * playbackRate;
 
-  while (nextNoteIndex < playbackNotes.length && playbackNotes[nextNoteIndex].start <= horizon) {
+  while (nextNoteIndex < playbackNotes.length && playbackNotes[nextNoteIndex].start <= sourceHorizon) {
     const note = playbackNotes[nextNoteIndex++];
-    const when = playbackStartedAt + note.start;
-    if (when >= audioContext.currentTime - 0.03) scheduleSynthNote(note, Math.max(when, audioContext.currentTime), playbackDuration);
+    const when = playbackStartedAt + note.start / playbackRate;
+    if (when >= audioContext.currentTime - 0.03) scheduleSynthNote(note, Math.max(when, audioContext.currentTime), playbackSourceDuration);
   }
 }
 
-async function startPlayback(seconds = null) {
+async function startPlayback(seconds = null, rate = 1) {
   if (!result?.notes?.length) return;
   await stopPlayback(false);
 
-  playbackDuration = Math.max(0.1, Math.min(seconds ?? result.duration_seconds, result.duration_seconds));
+  playbackRate = Math.max(0.5, Math.min(1.25, rate));
+  playbackSourceDuration = Math.max(0.1, Math.min(seconds ?? result.duration_seconds, result.duration_seconds));
   playbackNotes = result.notes
-    .filter(note => Number.isFinite(note.start) && Number.isFinite(note.midi) && note.start < playbackDuration)
+    .filter(note => Number.isFinite(note.start) && Number.isFinite(note.midi) && note.start < playbackSourceDuration)
     .sort((a, b) => a.start - b.start || a.midi - b.midi);
 
   if (!playbackNotes.length) {
@@ -207,14 +310,17 @@ async function startPlayback(seconds = null) {
   audioContext = new AudioContext();
   await audioContext.resume();
   masterGain = audioContext.createGain();
-  masterGain.gain.setValueAtTime(0.82, audioContext.currentTime);
+  masterGain.gain.setValueAtTime(result?.instrument === 'guitar' ? 0.92 : 0.82, audioContext.currentTime);
   masterGain.connect(audioContext.destination);
+  guitarWave = result?.instrument === 'guitar' ? buildGuitarWave(audioContext) : null;
+  pluckNoiseBuffer = result?.instrument === 'guitar' ? buildPluckNoise(audioContext) : null;
 
   nextNoteIndex = 0;
   playbackStartedAt = audioContext.currentTime + 0.08;
-  document.querySelector('#playbackStatus').textContent = seconds ? 'Playing first 10 seconds of detected notes…' : 'Playing full detected transcription…';
-  document.querySelector('#playTen').disabled = true;
-  document.querySelector('#playAll').disabled = true;
+  const windowLabel = seconds ? `first ${Math.round(playbackSourceDuration)} seconds` : 'full transcription';
+  const rateLabel = playbackRate === 1 ? '' : ` at ${playbackRate.toFixed(2)}× speed`;
+  document.querySelector('#playbackStatus').textContent = `Playing ${windowLabel}${rateLabel} with guitar-like plucked tones…`;
+  ['playTen','playTenSlow','playAll'].forEach(id => { const b = document.querySelector(`#${id}`); if (b) b.disabled = true; });
   document.querySelector('#stopPlayback').disabled = false;
   document.querySelector('#playbackProgress').style.width = '0%';
 
@@ -239,19 +345,18 @@ async function stopPlayback(completed = false) {
   }
   audioContext = null;
   masterGain = null;
+  guitarWave = null;
+  pluckNoiseBuffer = null;
   playbackNotes = [];
   nextNoteIndex = 0;
 
-  const playTen = document.querySelector('#playTen');
-  const playAll = document.querySelector('#playAll');
+  ['playTen','playTenSlow','playAll'].forEach(id => { const b = document.querySelector(`#${id}`); if (b) b.disabled = false; });
   const stop = document.querySelector('#stopPlayback');
-  if (playTen) playTen.disabled = false;
-  if (playAll) playAll.disabled = false;
   if (stop) stop.disabled = true;
 
   document.querySelectorAll('#notesBody tr.playing').forEach(row => row.classList.remove('playing'));
   if (completed) {
-    document.querySelector('#playbackStatus').textContent = 'Playback finished. Compare it with the original sample.';
+    document.querySelector('#playbackStatus').textContent = 'Playback finished. Compare what you heard with the original sample.';
     document.querySelector('#playbackProgress').style.width = '100%';
   } else if (result) {
     document.querySelector('#playbackStatus').textContent = 'Ready to play.';
@@ -292,8 +397,9 @@ function originalSampleUrl() {
   chart.append(result.instrument === 'guitar' ? renderGuitar(result.notes) : renderFlute(result.notes));
   renderTable(result.notes, result.instrument);
 
-  document.querySelector('#playTen').addEventListener('click', () => startPlayback(10));
-  document.querySelector('#playAll').addEventListener('click', () => startPlayback());
+  document.querySelector('#playTen').addEventListener('click', () => startPlayback(10, 1));
+  document.querySelector('#playTenSlow').addEventListener('click', () => startPlayback(10, 0.75));
+  document.querySelector('#playAll').addEventListener('click', () => startPlayback(null, 1));
   document.querySelector('#stopPlayback').addEventListener('click', () => stopPlayback(false));
 
   const originalUrl = originalSampleUrl();

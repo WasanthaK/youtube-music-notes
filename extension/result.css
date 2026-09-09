@@ -3,8 +3,12 @@ body { margin: 0; }
 header { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 20px 28px; background: #fff; border-bottom: 1px solid #ddd; position: sticky; top: 0; z-index: 2; }
 h1 { margin: 0; font-size: 22px; }
 #meta { margin: 5px 0 0; color: #666; font-size: 13px; }
-.actions { display: flex; gap: 8px; }
+.actions, .playbackActions { display: flex; gap: 8px; flex-wrap: wrap; }
 button { border: 1px solid #bbb; border-radius: 8px; background: white; padding: 8px 12px; cursor: pointer; }
+button:hover:not(:disabled) { background: #f7f7f7; }
+button:disabled { opacity: .48; cursor: default; }
+button.primary { background: #171717; color: white; border-color: #171717; }
+button.primary:hover:not(:disabled) { background: #303030; }
 main { max-width: 1200px; margin: 20px auto; padding: 0 20px 50px; }
 .card { background: #fff; border: 1px solid #ddd; border-radius: 12px; padding: 18px; margin-bottom: 16px; overflow: hidden; }
 h2 { margin: 0 0 14px; font-size: 16px; }
@@ -15,3 +19,15 @@ table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { text-align: left; border-bottom: 1px solid #eee; padding: 8px; }
 th { position: sticky; top: 0; background: white; }
 .noteLabel { font-size: 11px; fill: #333; }
+.playbackCard { overflow: visible; }
+.playbackHeader { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; }
+.playbackHeader h2 { margin-bottom: 5px; }
+.helper { margin: 0; color: #666; font-size: 13px; max-width: 620px; line-height: 1.45; }
+.playbackStatusRow { display: flex; justify-content: space-between; gap: 12px; margin-top: 16px; color: #555; font-size: 12px; }
+#playbackClock { font-variant-numeric: tabular-nums; }
+.progressTrack { margin-top: 8px; height: 6px; border-radius: 999px; background: #ececec; overflow: hidden; }
+#playbackProgress { height: 100%; width: 0%; background: #171717; transition: width .08s linear; }
+tr.playing td { background: #f3f3f3; font-weight: 600; }
+@media (max-width: 760px) {
+  header, .playbackHeader { flex-direction: column; align-items: stretch; }
+}

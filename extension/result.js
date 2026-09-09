@@ -1,5 +1,32 @@
 const NS = 'http://www.w3.org/2000/svg';
+const DB_NAME = 'youtube-music-notes-extension';
+const STORE_NAME = 'analysis';
 let result;
+
+function openDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(STORE_NAME)) request.result.createObjectStore(STORE_NAME);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function loadLatestResult() {
+  const db = await openDb();
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readonly');
+      const request = tx.objectStore(STORE_NAME).get('latest');
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error);
+    });
+  } finally {
+    db.close();
+  }
+}
 
 function el(tag, attrs = {}) {
   const node = document.createElementNS(NS, tag);
@@ -35,7 +62,7 @@ function renderGuitar(notes) {
     const x = 85 + idx*58;
     const lineIndex = 6 - n.guitar.string;
     const y = top + lineIndex*gap;
-    const bg = el('circle', { cx: x, cy: y, r: 12, fill: '#fff', stroke: '#111' }); svg.append(bg);
+    svg.append(el('circle', { cx: x, cy: y, r: 12, fill: '#fff', stroke: '#111' }));
     const f = el('text', { x: x-4, y: y+4, 'font-size': 11, 'font-weight': 700 }); f.textContent = n.guitar.fret; svg.append(f);
     const label = el('text', { x: x-13, y: 25, class: 'noteLabel' }); label.textContent = n.name; svg.append(label);
     const tm = el('text', { x: x-13, y: 245, class: 'noteLabel' }); tm.textContent = n.start.toFixed(1)+'s'; svg.append(tm);
@@ -56,15 +83,13 @@ function renderFlute(notes) {
     const pc = midi % 12;
     const nearest = Object.keys(stepMap).map(Number).sort((a,b)=>Math.abs(a-pc)-Math.abs(b-pc))[0];
     const diatonic = octave*7 + stepMap[nearest];
-    const e4 = 4*7 + 2;
-    return diatonic - e4;
+    return diatonic - (4*7 + 2);
   }
 
   notes.forEach((n, idx) => {
     const x = 85 + idx*54;
-    const step = staffStep(n.midi);
-    const y = top + 4*gap - step*(gap/2);
-    const head = el('ellipse', { cx: x, cy: y, rx: 7, ry: 5, fill: '#111', transform: `rotate(-18 ${x} ${y})` }); svg.append(head);
+    const y = top + 4*gap - staffStep(n.midi)*(gap/2);
+    svg.append(el('ellipse', { cx: x, cy: y, rx: 7, ry: 5, fill: '#111', transform: `rotate(-18 ${x} ${y})` }));
     svg.append(el('line', { x1: x+6, y1: y, x2: x+6, y2: y-34, stroke: '#111', 'stroke-width': 1.5 }));
     const label = el('text', { x: x-13, y: 32, class: 'noteLabel' }); label.textContent = n.name; svg.append(label);
     const tm = el('text', { x: x-12, y: 235, class: 'noteLabel' }); tm.textContent = n.start.toFixed(1)+'s'; svg.append(tm);
@@ -85,7 +110,13 @@ function renderTable(notes, instrument) {
 }
 
 (async () => {
-  ({ analysisResult: result } = await chrome.storage.local.get('analysisResult'));
+  try {
+    result = await loadLatestResult();
+  } catch (error) {
+    document.querySelector('#chart').textContent = `Could not load analysis result: ${error?.message || error}`;
+    return;
+  }
+
   if (!result) {
     document.querySelector('#chart').textContent = 'No analysis result found.';
     return;

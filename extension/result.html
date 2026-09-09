@@ -19,6 +19,26 @@
   </header>
 
   <main>
+    <section class="card playbackCard">
+      <div class="playbackHeader">
+        <div>
+          <h2>Listen to the transcription</h2>
+          <p class="helper">This is a simple synthesized reference. Compare its notes and rhythm with the original recording.</p>
+        </div>
+        <div class="playbackActions">
+          <button id="playTen" class="primary">▶ First 10 sec</button>
+          <button id="playAll">▶ Full transcription</button>
+          <button id="stopPlayback" disabled>■ Stop</button>
+          <button id="openOriginal" hidden>Open original sample ↗</button>
+        </div>
+      </div>
+      <div class="playbackStatusRow">
+        <span id="playbackStatus">Ready to play.</span>
+        <span id="playbackClock">0.0s</span>
+      </div>
+      <div class="progressTrack" aria-hidden="true"><div id="playbackProgress"></div></div>
+    </section>
+
     <section class="card">
       <h2 id="chartTitle">Notation</h2>
       <div id="chart"></div>

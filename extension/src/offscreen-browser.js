@@ -152,8 +152,10 @@ async function analyseBlob(blob) {
       durationSeconds: duration,
       mergedPerSecond: perSecond(result.summary.mergedCandidates, duration),
       teachingPerSecond: perSecond(result.summary.teachingCandidates, duration),
+      v11PlayablePerSecond: perSecond(result.summary.v11PlayableNotes ?? result.summary.playableNotes, duration),
       playablePerSecond: perSecond(result.summary.playableNotes, duration),
-      onsetGroupsPerSecond: perSecond(result.summary.onsetGroups, duration)
+      onsetGroupsPerSecond: perSecond(result.summary.onsetGroups, duration),
+      v12OnsetGroupsPerSecond: perSecond(result.summary.v12OnsetGroups ?? result.summary.onsetGroups, duration)
     };
   } else {
     const result = buildFluteTranscription(frames, onsets, contours);
@@ -216,7 +218,23 @@ async function saveDiagnostic(result) {
       end_seconds: result.benchmark.endSeconds,
       requested_duration_seconds: result.benchmark.requestedDurationSeconds,
       local_browser_analysis: true,
-      audio_uploaded: false
+      audio_uploaded: false,
+      v1_2_ab: result.instrument === 'guitar' ? {
+        v11_playable_notes: s.v11PlayableNotes ?? null,
+        v11_playable_per_second: s.v11PlayablePerSecond ?? null,
+        v11_onset_groups: s.onsetGroups ?? null,
+        v11_average_confidence: s.v11AverageConfidence ?? null,
+        harmonic_rejected: s.harmonicRejected ?? null,
+        micro_onset_rejected_notes: s.microOnsetRejectedNotes ?? null,
+        micro_onset_rejected_groups: s.microOnsetRejectedGroups ?? null,
+        v12_onset_groups: s.v12OnsetGroups ?? null,
+        chord_plausibility_rejected: s.chordPlausibilityRejected ?? null,
+        pre_density_playable_notes: s.preDensityPlayableNotes ?? null,
+        density_rejected: s.densityRejected ?? null,
+        learner_notes_per_second_cap: s.learnerNotesPerSecondCap ?? null,
+        v12_playable_notes: s.playableNotes ?? null,
+        v12_playable_per_second: s.playablePerSecond ?? null
+      } : null
     }
   };
 

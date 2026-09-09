@@ -20,14 +20,28 @@ th, td { text-align: left; border-bottom: 1px solid #eee; padding: 8px; }
 th { position: sticky; top: 0; background: white; }
 .noteLabel { font-size: 11px; fill: #333; }
 .playbackCard { overflow: visible; }
-.playbackHeader { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; }
-.playbackHeader h2 { margin-bottom: 5px; }
-.helper { margin: 0; color: #666; font-size: 13px; max-width: 620px; line-height: 1.45; }
+.playbackHeader, .criticHeader { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; }
+.playbackHeader h2, .criticHeader h2 { margin-bottom: 5px; }
+.helper { margin: 0; color: #666; font-size: 13px; max-width: 680px; line-height: 1.45; }
 .playbackStatusRow { display: flex; justify-content: space-between; gap: 12px; margin-top: 16px; color: #555; font-size: 12px; }
 #playbackClock { font-variant-numeric: tabular-nums; }
 .progressTrack { margin-top: 8px; height: 6px; border-radius: 999px; background: #ececec; overflow: hidden; }
 #playbackProgress { height: 100%; width: 0%; background: #171717; transition: width .08s linear; }
 tr.playing td { background: #f3f3f3; font-weight: 600; }
+.criticStatus { color: #666; font-size: 13px; margin: 16px 0 0; }
+.criticGrid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 10px; margin-top: 16px; }
+.criticScore, .criticBadgeRow { border: 1px solid #e2e2e2; border-radius: 10px; padding: 12px; display: flex; justify-content: space-between; gap: 10px; align-items: center; font-size: 13px; }
+.criticScore strong { font-size: 16px; }
+.criticBadge { text-transform: capitalize; border-radius: 999px; padding: 3px 8px; font-size: 12px; background: #ececec; }
+.criticBadge.low, .criticBadge.promising { background: #e9f6ec; }
+.criticBadge.medium, .criticBadge.mixed { background: #fff4d6; }
+.criticBadge.high, .criticBadge.poor { background: #fde8e8; }
+.criticSummary { margin: 16px 0 0; line-height: 1.5; }
+.criticSections { margin-top: 16px; }
+.criticSection { display: grid; grid-template-columns: 90px 72px 1fr; gap: 10px; align-items: start; padding: 9px 0; border-bottom: 1px solid #eee; font-size: 13px; }
+.criticFootnote { margin: 12px 0 0; color: #777; font-size: 11px; }
 @media (max-width: 760px) {
-  header, .playbackHeader { flex-direction: column; align-items: stretch; }
+  header, .playbackHeader, .criticHeader { flex-direction: column; align-items: stretch; }
+  .criticGrid { grid-template-columns: 1fr 1fr; }
+  .criticSection { grid-template-columns: 72px 64px 1fr; }
 }

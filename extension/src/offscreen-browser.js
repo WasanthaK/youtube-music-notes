@@ -4,6 +4,8 @@ import { buildGuitarTranscription } from './guitarEngine.js';
 const MODEL_URL = 'https://unpkg.com/@spotify/basic-pitch@1.0.1/model/model.json';
 const SUPABASE_URL = 'https://kgoowanohmtprbwdokjd.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_4dlNhnTkkyQRx8CJTqWXfQ_tfx8bz-o';
+const DB_NAME = 'youtube-music-notes-extension';
+const STORE_NAME = 'analysis';
 
 let recorder = null;
 let chunks = [];
@@ -18,8 +20,32 @@ const perSecond = (count, duration) => duration > 0 ? count / duration : 0;
 async function reportProgress(captureMessage) {
   try {
     await chrome.runtime.sendMessage({ type: 'ANALYSIS_PROGRESS', captureMessage });
-  } catch {
-    // Progress display is best-effort; analysis should continue even if popup/service worker is restarting.
+  } catch {}
+}
+
+function openDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(STORE_NAME)) request.result.createObjectStore(STORE_NAME);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function saveAnalysisResult(result) {
+  const db = await openDb();
+  try {
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      tx.objectStore(STORE_NAME).put(result, 'latest');
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted.'));
+    });
+  } finally {
+    db.close();
   }
 }
 
@@ -223,6 +249,7 @@ async function endRecording() {
 
   const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
   const result = await analyseBlob(blob);
+  await saveAnalysisResult(result);
   await saveDiagnostic(result);
   await chrome.runtime.sendMessage({ type: 'ANALYSIS_READY', result });
 

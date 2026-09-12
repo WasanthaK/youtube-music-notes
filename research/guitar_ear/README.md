@@ -46,18 +46,22 @@ For weakly-labelled clips, `guitar_present: true/false` can be used without exac
 
 ## GuitarSet preparation
 
-Use the **mono microphone** mix and JAMS annotations. GuitarSet contains time-aligned note annotations and is suitable for attack supervision.
+Use the **mono microphone** mix and JAMS annotations. GuitarSet contains time-aligned note annotations and is suitable for attack supervision. The selective downloader fetches only the annotation archive and mono-microphone audio from the current Zenodo record, rather than the much larger hex-pickup archives.
 
-Two tracks with known timing issues are excluded by the script.
+```bash
+python download_guitarset.py --dest data/GuitarSet
+```
+
+Then build the training manifest:
 
 ```bash
 python prepare_guitarset.py \
-  --annotations D:/datasets/GuitarSet/annotation \
-  --audio D:/datasets/GuitarSet/audio_mono-mic \
+  --annotations data/GuitarSet/annotation \
+  --audio data/GuitarSet/audio_mono-mic \
   --out data/guitarset.jsonl
 ```
 
-The split holds out player `05` as test and player `04` as validation, so the primary test guitarist is unseen during training.
+Two tracks with known timing issues are excluded by the script. The split holds out player `05` as test and player `04` as validation, so the primary test guitarist is unseen during training.
 
 ## Train
 

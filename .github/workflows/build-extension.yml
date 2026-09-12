@@ -45,6 +45,7 @@ jobs:
           cp extension/result.html extension-package/
           cp extension/result.js extension-package/
           cp extension/result.css extension-package/
+          cp extension/original-audio.js extension-package/
           cp extension/critic.js extension-package/
           cp extension/service_worker.js extension-package/
           cp extension/dist/offscreen.bundle.js extension-package/dist/
@@ -53,9 +54,12 @@ jobs:
         run: |
           test -f extension-package/manifest.json
           test -f extension-package/service_worker.js
+          test -f extension-package/original-audio.js
           test -f extension-package/critic.js
           test -f extension-package/dist/offscreen.bundle.js
           node -e "JSON.parse(require('fs').readFileSync('extension-package/manifest.json','utf8')); console.log('manifest.json OK')"
+          node --check extension-package/original-audio.js
+          node --check extension-package/result.js
 
       - name: Upload ready-to-load extension
         uses: actions/upload-artifact@v4

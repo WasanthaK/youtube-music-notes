@@ -22,6 +22,12 @@ MAX_FRET = 24
 ONSET_CLUSTER_SECONDS = 0.065
 SAME_NOTE_MERGE_SECONDS = 0.055
 
+# These are integration tolerances, not model decision thresholds. The model
+# thresholds remain frozen in guitar_ear_calibration.json from validation data.
+GUITAR_EAR_ATTACK_MATCH_SECONDS = 0.18
+GUITAR_EAR_ACTIVE_PAD_SECONDS = 0.08
+GUITAR_EAR_STRONG_FALLBACK_CONFIDENCE = 0.88
+
 PASSES = [
     {"id": "strict", "onset": 0.40, "frame": 0.28, "minFrames": 5, "energyTolerance": 10},
     {"id": "balanced", "onset": 0.30, "frame": 0.22, "minFrames": 4, "energyTolerance": 11},
@@ -197,12 +203,117 @@ def group_into_onsets(notes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return clusters
 
 
-def build_guitar_transcription(audio_path) -> Dict[str, Any]:
+def _in_active_interval(anchor: float, intervals: List[Dict[str, Any]]) -> bool:
+    return any(
+        float(interval.get("start", 0.0)) - GUITAR_EAR_ACTIVE_PAD_SECONDS
+        <= anchor
+        <= float(interval.get("end", 0.0)) + GUITAR_EAR_ACTIVE_PAD_SECONDS
+        for interval in intervals
+    )
+
+
+def _nearest_attack_distance(anchor: float, attacks: List[float]) -> float | None:
+    if not attacks:
+        return None
+    return min(abs(anchor - float(value)) for value in attacks)
+
+
+def _strong_cluster_fallback(cluster: Dict[str, Any]) -> bool:
+    notes = cluster.get("notes") or []
+    return any(
+        float(note.get("confidence", 0.0)) >= GUITAR_EAR_STRONG_FALLBACK_CONFIDENCE
+        and float(note.get("consensus", 0.0)) >= 0.999
+        for note in notes
+    )
+
+
+def apply_guitar_ear_gate(
+    clusters: List[Dict[str, Any]],
+    guitar_ear: Dict[str, Any] | None,
+) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    pre_count = len(clusters)
+    if not guitar_ear or not guitar_ear.get("available"):
+        return clusters, {
+            "enabled": False,
+            "preGateOnsetGroups": pre_count,
+            "postGateOnsetGroups": pre_count,
+            "gateRejectedGroups": 0,
+            "rejectedOutsideActiveRegions": 0,
+            "rejectedWithoutAttackSupport": 0,
+            "attackMatchedGroups": 0,
+            "strongFallbackGroups": 0,
+        }
+
+    intervals = list(guitar_ear.get("active_intervals") or [])
+    attacks = [float(value) for value in (guitar_ear.get("attack_times") or [])]
+    kept: List[Dict[str, Any]] = []
+    attack_matched = 0
+    fallback = 0
+    rejected_inactive = 0
+    rejected_no_attack = 0
+
+    for cluster in clusters:
+        anchor = float(cluster["anchor"])
+        if not _in_active_interval(anchor, intervals):
+            rejected_inactive += 1
+            continue
+
+        distance = _nearest_attack_distance(anchor, attacks)
+        if distance is not None and distance <= GUITAR_EAR_ATTACK_MATCH_SECONDS:
+            cluster = dict(cluster)
+            cluster["guitarEarSupport"] = "attack"
+            cluster["guitarEarAttackDistance"] = round(distance, 4)
+            kept.append(cluster)
+            attack_matched += 1
+            continue
+
+        if _strong_cluster_fallback(cluster):
+            cluster = dict(cluster)
+            cluster["guitarEarSupport"] = "strong-basic-pitch-fallback"
+            kept.append(cluster)
+            fallback += 1
+            continue
+
+        rejected_no_attack += 1
+
+    return kept, {
+        "enabled": True,
+        "preGateOnsetGroups": pre_count,
+        "postGateOnsetGroups": len(kept),
+        "gateRejectedGroups": pre_count - len(kept),
+        "rejectedOutsideActiveRegions": rejected_inactive,
+        "rejectedWithoutAttackSupport": rejected_no_attack,
+        "attackMatchedGroups": attack_matched,
+        "strongFallbackGroups": fallback,
+        "attackMatchWindowSeconds": GUITAR_EAR_ATTACK_MATCH_SECONDS,
+        "activeRegionPaddingSeconds": GUITAR_EAR_ACTIVE_PAD_SECONDS,
+    }
+
+
+def _compact_guitar_ear(guitar_ear: Dict[str, Any] | None) -> Dict[str, Any]:
+    if not guitar_ear:
+        return {"available": False}
+    return {
+        "available": bool(guitar_ear.get("available")),
+        "device": guitar_ear.get("device"),
+        "model": guitar_ear.get("model"),
+        "presenceSegmentThreshold": guitar_ear.get("presence_segment_threshold"),
+        "attackThreshold": guitar_ear.get("attack_threshold"),
+        "meanPresence": guitar_ear.get("mean_presence"),
+        "activeFraction": guitar_ear.get("active_fraction"),
+        "attackCount": guitar_ear.get("attack_count", 0),
+        "activeIntervals": guitar_ear.get("active_intervals", []),
+        "error": guitar_ear.get("error"),
+    }
+
+
+def build_guitar_transcription(audio_path, guitar_ear: Dict[str, Any] | None = None) -> Dict[str, Any]:
     model_output = run_inference(audio_path, ICASSP_2022_MODEL_PATH)
     pass_results = [decode_pass(model_output, pass_config) for pass_config in PASSES]
     merged = merge_pass_detections(pass_results)
     teaching_candidates = [note for note in merged if is_teaching_candidate(note)]
-    clusters = group_into_onsets(teaching_candidates)
+    pre_gate_clusters = group_into_onsets(teaching_candidates)
+    clusters, gate_stats = apply_guitar_ear_gate(pre_gate_clusters, guitar_ear)
 
     playable: List[Dict[str, Any]] = []
     previous_hand_position = 3.0
@@ -211,6 +322,9 @@ def build_guitar_transcription(audio_path) -> Dict[str, Any]:
         for note in assigned:
             note["chordId"] = chord_id
             note["bendSemitones"] = 0.0
+            note["guitarEarSupport"] = cluster.get("guitarEarSupport", "not-enabled")
+            if "guitarEarAttackDistance" in cluster:
+                note["guitarEarAttackDistance"] = cluster["guitarEarAttackDistance"]
             playable.append(note)
 
     playable.sort(key=lambda n: (n["start"], n["guitar"]["string"]))
@@ -218,9 +332,10 @@ def build_guitar_transcription(audio_path) -> Dict[str, Any]:
     uncertain = sum(1 for note in playable if note["confidence"] < 0.48)
     average_confidence = sum(note["confidence"] for note in playable) / len(playable) if playable else 0.0
     sensitive_only = sum(1 for note in merged if note["detectionSources"] == ["sensitive"])
+    gate_enabled = bool(gate_stats["enabled"])
 
     return {
-        "engine": "guitar-basic-pitch-ensemble-v1.1-python",
+        "engine": "guitar-ear-v0.2d+basic-pitch-ensemble-v2-python" if gate_enabled else "guitar-basic-pitch-ensemble-v1.1-python",
         "notes": playable,
         "summary": {
             "rawByPass": {pass_config["id"]: len(pass_results[index]) for index, pass_config in enumerate(PASSES)},
@@ -233,5 +348,7 @@ def build_guitar_transcription(audio_path) -> Dict[str, Any]:
             "highConfidence": high_confidence,
             "uncertain": uncertain,
             "averageConfidence": average_confidence,
+            "guitarEar": _compact_guitar_ear(guitar_ear),
+            "guitarEarGate": gate_stats,
         },
     }

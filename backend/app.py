@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from basic_pitch.inference import predict
 
+from guitar_ear_gate import analyze_guitar_audio, guitar_ear_status
 from guitar_engine import build_guitar_transcription
 from music_document import build_music_document
 from reasoning import reason_about_music
@@ -163,6 +164,23 @@ def record_diagnostic(row: Dict[str, Any]) -> Dict[str, Any]:
     return local_row
 
 
+def compact_guitar_ear_diagnostic(summary: Dict[str, Any] | None) -> Dict[str, Any] | None:
+    if not summary:
+        return None
+    guitar_ear = summary.get("guitarEar") or {}
+    gate = summary.get("guitarEarGate") or {}
+    return {
+        "available": guitar_ear.get("available"),
+        "device": guitar_ear.get("device"),
+        "model": guitar_ear.get("model"),
+        "mean_presence": guitar_ear.get("meanPresence"),
+        "active_fraction": guitar_ear.get("activeFraction"),
+        "attack_count": guitar_ear.get("attackCount"),
+        "active_intervals": guitar_ear.get("activeIntervals", []),
+        "gate": gate,
+    }
+
+
 def diagnostic_row(
     *,
     youtube_video_id: str | None,
@@ -211,12 +229,14 @@ def diagnostic_row(
             "start_seconds": start_seconds,
             "end_seconds": end_seconds,
             "requested_duration_seconds": requested_duration_seconds,
+            "guitar_ear": compact_guitar_ear_diagnostic(summary),
         },
     }
 
 
 @app.get("/health")
 def health():
+    gate_status = guitar_ear_status()
     return {
         "ok": True,
         "ffmpeg": bool(shutil.which("ffmpeg")),
@@ -224,7 +244,8 @@ def health():
         "reasoning": ["openai", "gemini"],
         "diagnostics_file": str(DIAGNOSTICS_PATH),
         "supabase_diagnostics": bool(os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_SERVICE_ROLE_KEY")),
-        "guitar_engine": "guitar-basic-pitch-ensemble-v1.1-python",
+        "guitar_engine": "guitar-ear-v0.2d+basic-pitch-ensemble-v2-python" if gate_status.get("available") else "guitar-basic-pitch-ensemble-v1.1-python",
+        "guitar_ear": gate_status,
     }
 
 
@@ -252,15 +273,20 @@ async def transcribe(
         src = workdir / "capture.webm"
         wav = workdir / "capture.wav"
         src.write_bytes(await audio.read())
+        guitar_ear_result: Dict[str, Any] | None = None
 
         try:
             run_ffmpeg(src, wav)
 
             if instrument == "guitar":
+                # Guitar Ear always evaluates the original mix. Basic Pitch may
+                # optionally run on the Demucs guitar stem, but timestamps remain
+                # aligned so Guitar Ear can gate its onset groups.
+                guitar_ear_result = analyze_guitar_audio(wav)
                 analysis_source = wav
                 if mode == "transcribe":
                     analysis_source = try_guitar_stem(wav, workdir)
-                guitar_result = build_guitar_transcription(analysis_source)
+                guitar_result = build_guitar_transcription(analysis_source, guitar_ear=guitar_ear_result)
                 events = []
                 for note in guitar_result["notes"]:
                     events.append({
@@ -301,14 +327,19 @@ async def transcribe(
         detected_duration = max((e["end"] for e in events), default=0.0)
         duration = float(requested_duration_seconds or detected_duration)
 
-        warnings = (
-            [
-                "Automatic transcription is approximate, especially on dense full mixes.",
-                "Guitar uses the v1.1 multi-pass teaching-note gate; mixed recordings may still include harmonics or other instruments.",
-            ]
-            if instrument == "guitar"
-            else ["Flute mode extracts an approximate monophonic melody and may need manual correction."]
-        )
+        if instrument == "guitar":
+            if guitar_ear_result and guitar_ear_result.get("available"):
+                warnings = [
+                    "Automatic transcription is approximate, especially on dense full mixes.",
+                    "Guitar Ear v0.2d gates Basic Pitch onset groups using frozen validation thresholds; strong three-pass Basic Pitch consensus is retained as a safety fallback.",
+                ]
+            else:
+                warnings = [
+                    "Automatic transcription is approximate, especially on dense full mixes.",
+                    "Guitar Ear v0.2d is unavailable, so this result used the legacy Basic Pitch teaching-note gate.",
+                ]
+        else:
+            warnings = ["Flute mode extracts an approximate monophonic melody and may need manual correction."]
 
         document = build_music_document(
             title=title,

@@ -219,6 +219,7 @@ async function saveDiagnostic(result) {
       requested_duration_seconds: result.benchmark.requestedDurationSeconds,
       local_browser_analysis: true,
       audio_uploaded: false,
+      local_audio_retained: true,
       v1_2_ab: result.instrument === 'guitar' ? {
         v11_playable_notes: s.v11PlayableNotes ?? null,
         v11_playable_per_second: s.v11PlayablePerSecond ?? null,
@@ -267,7 +268,14 @@ async function endRecording() {
 
   const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
   const result = await analyseBlob(blob);
-  await saveAnalysisResult(result);
+  const localResult = {
+    ...result,
+    captured_audio_blob: blob,
+    captured_audio_mime_type: blob.type || 'audio/webm',
+    captured_audio_size_bytes: blob.size,
+    captured_audio_local_only: true
+  };
+  await saveAnalysisResult(localResult);
   await saveDiagnostic(result);
   await chrome.runtime.sendMessage({ type: 'ANALYSIS_READY', result });
 

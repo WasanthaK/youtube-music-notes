@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "YouTube Music Notes",
-  "version": "0.4.4",
-  "description": "Capture a 30-second YouTube sample, transcribe it locally in Chrome with Guitar Engine v1.2, hear guitar-like playback, and run an on-demand AI transcription critic.",
+  "version": "0.4.5",
+  "description": "Capture a 30-second YouTube sample, retain the original audio locally for A/B comparison, transcribe it in Chrome, hear guitar-like playback, and run an on-demand AI transcription critic.",
   "permissions": ["activeTab", "tabCapture", "offscreen", "tabs", "scripting"],
   "host_permissions": [
     "https://www.youtube.com/*",

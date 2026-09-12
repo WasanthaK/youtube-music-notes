@@ -19,11 +19,31 @@
   </header>
 
   <main>
+    <section class="card originalAudioCard" id="originalAudioCard">
+      <div class="playbackHeader">
+        <div>
+          <h2>Original captured audio</h2>
+          <p class="helper">This is the exact audio captured from the YouTube tab before transcription. It stays local in Chrome so you can A/B it directly against our detected-guitar playback.</p>
+        </div>
+        <div class="playbackActions">
+          <button id="playOriginalTen" class="primary" data-original-audio-control>▶ Original · first 10 sec</button>
+          <button id="playOriginalTenSlow" data-original-audio-control>▶ Original · first 10 sec · 0.75×</button>
+          <button id="stopOriginalAudio" data-original-audio-control>■ Stop original</button>
+          <button id="downloadOriginalAudio" data-original-audio-control>Download captured sample</button>
+        </div>
+      </div>
+      <audio id="capturedOriginalAudio" class="capturedAudio" controls preload="metadata" hidden></audio>
+      <div class="playbackStatusRow">
+        <span id="originalAudioStatus">Checking for a saved local capture…</span>
+        <span id="originalAudioMeta"></span>
+      </div>
+    </section>
+
     <section class="card playbackCard">
       <div class="playbackHeader">
         <div>
-          <h2>Listen to the transcription</h2>
-          <p class="helper">Guitar playback now uses plucked-string tones with natural decay. The notes and timing are still exactly what the transcription engine detected, so extra or wrong notes should be easier to hear.</p>
+          <h2>Detected guitar playback</h2>
+          <p class="helper">Guitar playback uses plucked-string tones with natural decay. The notes and timing are exactly what the transcription engine detected, so compare this directly with the original capture above.</p>
         </div>
         <div class="playbackActions">
           <button id="playTen" class="primary">▶ Guitar · first 10 sec</button>
@@ -68,6 +88,7 @@
     </section>
   </main>
   <script src="result.js"></script>
+  <script src="original-audio.js"></script>
   <script src="critic.js"></script>
 </body>
 </html>

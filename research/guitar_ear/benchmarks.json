@@ -1,0 +1,22 @@
+{
+  "version": "guitar-ear-benchmarks-v0.1",
+  "benchmarks": [
+    {
+      "youtube_video_id": "75hjfkb6QkY",
+      "role": "guitar_dominant_reference",
+      "window_seconds": [30, 60],
+      "notes": "User-supplied 30-second capture. Reserve for evaluation; do not train on it."
+    },
+    {
+      "youtube_video_id": "FFdQVbCbW7g",
+      "role": "mixed_song_reference",
+      "window_seconds": [30, 60],
+      "notes": "User-supplied 30-second capture with vocals/full mix. Reserve for evaluation; do not train on it."
+    }
+  ],
+  "success_criteria": {
+    "presence": "Guitar-dominant reference should show materially higher mean guitar-presence probability than mixed reference.",
+    "attack": "Attack count should track audible guitar attacks rather than converge toward a fixed density.",
+    "regression": "The two benchmark traces should not collapse to nearly identical activity/density profiles."
+  }
+}

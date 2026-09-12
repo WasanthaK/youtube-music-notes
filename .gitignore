@@ -8,3 +8,6 @@ venv/
 node_modules/
 dist/
 .DS_Store
+research/guitar_ear/data/
+research/guitar_ear/checkpoints/
+research/guitar_ear/runs/

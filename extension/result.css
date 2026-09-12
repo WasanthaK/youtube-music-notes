@@ -19,12 +19,14 @@ table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { text-align: left; border-bottom: 1px solid #eee; padding: 8px; }
 th { position: sticky; top: 0; background: white; }
 .noteLabel { font-size: 11px; fill: #333; }
-.playbackCard { overflow: visible; }
+.playbackCard, .originalAudioCard { overflow: visible; }
 .playbackHeader, .criticHeader { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; }
 .playbackHeader h2, .criticHeader h2 { margin-bottom: 5px; }
 .helper { margin: 0; color: #666; font-size: 13px; max-width: 680px; line-height: 1.45; }
-.playbackStatusRow { display: flex; justify-content: space-between; gap: 12px; margin-top: 16px; color: #555; font-size: 12px; }
+.capturedAudio { width: 100%; margin-top: 16px; }
+.playbackStatusRow { display: flex; justify-content: space-between; gap: 12px; margin-top: 16px; color: #555; font-size: 12px; flex-wrap: wrap; }
 #playbackClock { font-variant-numeric: tabular-nums; }
+#originalAudioMeta { color: #777; text-align: right; }
 .progressTrack { margin-top: 8px; height: 6px; border-radius: 999px; background: #ececec; overflow: hidden; }
 #playbackProgress { height: 100%; width: 0%; background: #171717; transition: width .08s linear; }
 tr.playing td { background: #f3f3f3; font-weight: 600; }
@@ -44,4 +46,5 @@ tr.playing td { background: #f3f3f3; font-weight: 600; }
   header, .playbackHeader, .criticHeader { flex-direction: column; align-items: stretch; }
   .criticGrid { grid-template-columns: 1fr 1fr; }
   .criticSection { grid-template-columns: 72px 64px 1fr; }
+  #originalAudioMeta { text-align: left; }
 }

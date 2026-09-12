@@ -105,6 +105,80 @@ We should only claim progress when:
 2. attack counts follow audible guitar attacks rather than an arbitrary density target;
 3. improvements hold on GuitarSet's unseen-player test split.
 
+## Phase-2d status
+
+Phase-2d is currently the leading research candidate on the two reserved real-world benchmark recordings.
+
+Observed benchmark behaviour:
+
+| Model | Guitar-dominant mean presence | Mixed-song mean presence | Guitar attacks @ 0.65 | Mixed attacks @ 0.65 |
+| --- | ---: | ---: | ---: | ---: |
+| Phase-1 | 0.9998 | 0.9999 | 132 | 148 |
+| Phase-2c | 0.9944 | 0.9839 | 102 | 90 |
+| **Phase-2d** | **0.7713** | **0.4201** | **33** | **4** |
+
+Phase-2d also showed useful presence separation across fixed thresholds:
+
+- `0.50`: guitar-dominant active 92.2% vs mixed song 26.0%
+- `0.60`: 78.3% vs 9.8%
+- `0.70`: 66.1% vs 1.9%
+- `0.80`: 55.3% vs 0.0%
+
+These two real recordings are still **reserved benchmarks**. Their apparent separation must not be used to tune the production thresholds.
+
+## Calibrate and freeze thresholds
+
+Threshold calibration must use labelled validation data only.
+
+Presence calibration is frame-level. Because Guitar Ear is intended to gate downstream transcription, the default selection rule is:
+
+> choose the threshold with the highest recall while validation precision is at least 0.90; if no threshold reaches that precision floor, fall back to maximum F1.
+
+Attack calibration is event-level and uses one-to-one onset matching with a default `±50 ms` tolerance. The selected attack threshold maximizes event-level F1.
+
+Run:
+
+```bash
+python calibrate.py \
+  --checkpoint checkpoints/guitar-ear-phase-2d.pt \
+  --manifest data/phase-2d.jsonl \
+  --split val \
+  --presence-min-precision 0.90 \
+  --attack-tolerance-ms 50 \
+  --model-name guitar-ear-phase-2d \
+  --out checkpoints/guitar-ear-phase-2d-calibration.json
+```
+
+The calibration file records:
+
+- frozen presence threshold
+- frozen attack threshold
+- validation metrics and full threshold sweeps
+- source counts
+- onset tolerance and attack peak spacing
+- `benchmark_used_for_tuning: false`
+
+`calibrate.py` refuses `test` or `benchmark` as the calibration split.
+
+After calibration:
+
+1. freeze the Phase-2d weights;
+2. freeze both thresholds from the validation result;
+3. run the held-out test split once with no threshold changes;
+4. rerun the two real benchmark recordings as an external sanity check only;
+5. do not change thresholds in response to benchmark behaviour.
+
+If held-out performance remains strong, the intended production architecture is:
+
+```text
+song
+  -> Guitar Ear Phase-2d
+  -> guitar-active regions + attack hints
+  -> pitch transcriber
+  -> fingering / TAB optimizer
+  -> guitar TAB / notation
+```
+
 ## Next steps after v0.1
 
 1. Add negative/non-guitar clips from an openly licensed source.

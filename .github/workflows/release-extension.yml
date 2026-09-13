@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - 'RELEASE_V0_4_8'
+      - '.github/workflows/release-extension.yml'
 
 permissions:
   contents: write

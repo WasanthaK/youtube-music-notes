@@ -30,6 +30,11 @@ function cleanMidiToFrequency(midi) {
   return 440 * Math.pow(2, (Number(midi) - 69) / 12);
 }
 
+function setCleanStatus(message) {
+  const status = document.querySelector('#cleanPlaybackStatus');
+  if (status) status.textContent = message;
+}
+
 function stopCleanPlayback() {
   for (const source of cleanSources) {
     try { source.stop(); } catch {}
@@ -40,8 +45,7 @@ function stopCleanPlayback() {
     cleanAudioContext = null;
     void ctx.close();
   }
-  const status = document.querySelector('#cleanPlaybackStatus');
-  if (status) status.textContent = 'Clean diagnostic playback stopped.';
+  setCleanStatus('Clean diagnostic playback stopped.');
 }
 
 function clusterNotes(notes, tolerance = 0.075) {
@@ -115,18 +119,38 @@ function extractLeadLine(notes) {
 
 async function playClean(mode = 'all', seconds = 10) {
   stopCleanPlayback();
+
+  // Create/resume the AudioContext immediately from the button click so Chrome
+  // preserves the user-activation gesture. Do the asynchronous IndexedDB read
+  // only after the audio context has been unlocked.
+  cleanAudioContext = new AudioContext();
+  const ctx = cleanAudioContext;
+  try {
+    await ctx.resume();
+  } catch (error) {
+    setCleanStatus(`Could not start clean audio: ${error?.message || error}`);
+    return;
+  }
+
+  setCleanStatus('Loading saved transcription…');
   const result = await cleanLoadResult();
-  if (!result?.notes?.length) return;
+  if (!result?.notes?.length) {
+    setCleanStatus('No saved detected notes were found.');
+    stopCleanPlayback();
+    return;
+  }
 
   let notes = result.notes.filter(note => Number.isFinite(Number(note.start)) && Number.isFinite(Number(note.midi)));
   if (mode === 'lead') notes = extractLeadLine(notes);
   notes = notes.filter(note => Number(note.start) < seconds);
-  if (!notes.length) return;
+  if (!notes.length) {
+    setCleanStatus(`No ${mode === 'lead' ? 'lead-line' : 'detected'} notes in the first ${seconds} seconds.`);
+    stopCleanPlayback();
+    return;
+  }
 
-  cleanAudioContext = new AudioContext();
-  const ctx = cleanAudioContext;
   const master = ctx.createGain();
-  master.gain.value = mode === 'lead' ? 0.32 : 0.16;
+  master.gain.value = mode === 'lead' ? 0.42 : 0.24;
   master.connect(ctx.destination);
 
   const startAt = ctx.currentTime + 0.08;
@@ -148,10 +172,10 @@ async function playClean(mode = 'all', seconds = 10) {
     filter.frequency.setValueAtTime(mode === 'lead' ? 2400 : 3000, when);
 
     const gain = ctx.createGain();
-    const peak = 0.045 + Math.max(0, Math.min(1, Number(note.confidence || 0.5))) * 0.035;
+    const peak = 0.055 + Math.max(0, Math.min(1, Number(note.confidence || 0.5))) * 0.045;
     gain.gain.setValueAtTime(0.0001, when);
     gain.gain.exponentialRampToValueAtTime(peak, when + 0.015);
-    gain.gain.setValueAtTime(Math.max(0.012, peak * 0.72), when + Math.min(0.08, legatoDuration * 0.35));
+    gain.gain.setValueAtTime(Math.max(0.014, peak * 0.72), when + Math.min(0.08, legatoDuration * 0.35));
     gain.gain.exponentialRampToValueAtTime(0.0001, when + legatoDuration);
 
     osc.connect(filter);
@@ -162,12 +186,9 @@ async function playClean(mode = 'all', seconds = 10) {
     cleanSources.push(osc);
   }
 
-  const status = document.querySelector('#cleanPlaybackStatus');
-  if (status) {
-    status.textContent = mode === 'lead'
-      ? `Playing continuity-constrained lead line (${notes.length} notes / first ${seconds}s).`
-      : `Playing clean detected notes (${notes.length} notes / first ${seconds}s).`;
-  }
+  setCleanStatus(mode === 'lead'
+    ? `Playing continuity-constrained lead line (${notes.length} notes / first ${seconds}s).`
+    : `Playing clean detected notes (${notes.length} notes / first ${seconds}s).`);
 
   window.setTimeout(() => {
     if (cleanAudioContext === ctx) stopCleanPlayback();

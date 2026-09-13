@@ -28,7 +28,7 @@ rep(
   'Phase-2d call'
 );
 rep(
-  '    model: guitarEar.model ?? null,\n    phase: guitarEar.phase ?? null,\n    rhythm_conditioning: guitarEar.rhythmConditioning ?? null,\n    model_fallback_reason: guitarEar.modelFallbackReason ?? null,',
+  '    model: guitarEar.model ?? null,',
   '    model: guitarEar.model ?? null,\n    phase: guitarEar.phase ?? null,\n    model_sha256: guitarEar.modelSha256 ?? null,\n    graph_optimization_level: guitarEar.graphOptimizationLevel ?? null,\n    rhythm_conditioning: guitarEar.rhythmConditioning ?? null,\n    model_fallback_reason: guitarEar.modelFallbackReason ?? null,\n    error: guitarEar.error ?? null,',
   'compact Phase-2e metadata'
 );

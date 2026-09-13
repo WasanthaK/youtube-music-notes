@@ -18,9 +18,19 @@ rep(
   'Basic Pitch audio'
 );
 rep(
+  "await reportProgress('Guitar Ear Phase-2d is listening in Chrome…');",
+  "await reportProgress('Guitar Ear Phase-2e is listening with rhythm conditioning in Chrome…');",
+  'Phase-2e progress'
+);
+rep(
   'buildGuitarTranscriptionPhase2d(frames, onsets, contours, guitarEar)',
   'buildGuitarTranscriptionPhase2d(frames, onsets, contours, guitarEar, tempo)',
   'Phase-2d call'
+);
+rep(
+  '    model: guitarEar.model ?? null,',
+  '    model: guitarEar.model ?? null,\n    phase: guitarEar.phase ?? null,\n    rhythm_conditioning: guitarEar.rhythmConditioning ?? null,\n    model_fallback_reason: guitarEar.modelFallbackReason ?? null,',
+  'compact Phase-2e metadata'
 );
 rep(
   '      guitar_ear: compactGuitarEar(s),',

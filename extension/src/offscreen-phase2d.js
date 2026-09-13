@@ -176,7 +176,15 @@ async function analyseBlob(blob) {
     notes = result.notes.map(note => ({ ...note, name: midiName(note.midi) }));
     summary = {
       ...result.summary,
-      ...(guitarEar?.available ? {} : { guitarEar: guitarEar || { available: false } }),
+      ...(guitarEar?.available ? {
+        guitarEar: {
+          ...result.summary.guitarEar,
+          inferenceMode: guitarEar.inferenceMode || null,
+          windowStrideSeconds: guitarEar.windowStrideSeconds ?? null,
+          activeSegmentFraction: guitarEar.activeSegmentFraction ?? null,
+          segmentScores: guitarEar.segmentScores || [],
+        },
+      } : { guitarEar: guitarEar || { available: false } }),
       durationSeconds: duration,
       mergedPerSecond: perSecond(result.summary.mergedCandidates || 0, duration),
       teachingPerSecond: perSecond(result.summary.teachingCandidates || 0, duration),
@@ -228,6 +236,10 @@ function compactGuitarEar(summary) {
     active_fraction: guitarEar.activeFraction ?? null,
     attack_count: guitarEar.attackCount ?? null,
     active_intervals: guitarEar.activeIntervals || [],
+    inference_mode: guitarEar.inferenceMode ?? null,
+    window_stride_seconds: guitarEar.windowStrideSeconds ?? null,
+    active_segment_fraction: guitarEar.activeSegmentFraction ?? null,
+    segment_scores: guitarEar.segmentScores || [],
     gate
   };
 }
@@ -244,7 +256,7 @@ async function saveDiagnostic(result) {
     engine: result.engine || 'unknown',
     instrument: result.instrument,
     track_title: result.title,
-    source: 'chrome-extension',
+    source: 'chrome-extension-browser',
     duration_seconds: result.duration_seconds,
     raw_strict: s.rawByPass?.strict ?? null,
     raw_balanced: s.rawByPass?.balanced ?? null,
@@ -268,7 +280,17 @@ async function saveDiagnostic(result) {
       local_browser_analysis: true,
       audio_uploaded: false,
       local_audio_retained: true,
-      guitar_ear: compactGuitarEar(s)
+      guitar_ear: compactGuitarEar(s),
+      note_trace: (result.notes || []).map(note => ({
+        start: Number(note.start || 0),
+        end: Number(note.end || note.start || 0),
+        midi: Number(note.midi),
+        confidence: Number(note.confidence || 0),
+        chord_id: Number.isFinite(Number(note.chordId)) ? Number(note.chordId) : null,
+        support: note.guitarEarSupport || null,
+        string: note.guitar?.string ?? null,
+        fret: note.guitar?.fret ?? null
+      }))
     }
   };
 
@@ -277,7 +299,6 @@ async function saveDiagnostic(result) {
       method: 'POST',
       headers: {
         apikey: SUPABASE_PUBLISHABLE_KEY,
-        Authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
         'Content-Type': 'application/json',
         Prefer: 'return=minimal'
       },

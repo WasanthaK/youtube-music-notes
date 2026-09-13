@@ -4,6 +4,8 @@ import { buildGuitarTranscription } from './guitarEngine.js';
 import { buildGuitarTranscriptionPhase2d } from './guitarEnginePhase2d.js';
 
 const BASIC_PITCH_MODEL_URL = 'https://unpkg.com/@spotify/basic-pitch@1.0.1/model/model.json';
+const SUPABASE_URL = 'https://kgoowanohmtprbwdokjd.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_4dlNhnTkkyQRx8CJTqWXfQ_tfx8bz-o';
 const DB_NAME = 'youtube-music-notes-extension';
 const STORE_NAME = 'analysis';
 
@@ -214,6 +216,88 @@ async function analyseBlob(blob) {
   };
 }
 
+function compactGuitarEar(summary) {
+  const guitarEar = summary?.guitarEar || {};
+  const gate = summary?.guitarEarGate || {};
+  if (!Object.keys(guitarEar).length && !Object.keys(gate).length) return null;
+  return {
+    available: guitarEar.available ?? null,
+    device: guitarEar.device ?? null,
+    model: guitarEar.model ?? null,
+    mean_presence: guitarEar.meanPresence ?? null,
+    active_fraction: guitarEar.activeFraction ?? null,
+    attack_count: guitarEar.attackCount ?? null,
+    active_intervals: guitarEar.activeIntervals || [],
+    gate
+  };
+}
+
+async function saveDiagnostic(result) {
+  if (!result.benchmark) return { status: null, error: 'no-benchmark-metadata' };
+
+  const s = result.summary || {};
+  const row = {
+    user_id: null,
+    youtube_video_id: result.benchmark.videoId || null,
+    youtube_url: result.benchmark.videoUrl || null,
+    reference_label: result.benchmark.mode || 'fixed-30s-v1',
+    engine: result.engine || 'unknown',
+    instrument: result.instrument,
+    track_title: result.title,
+    source: 'chrome-extension',
+    duration_seconds: result.duration_seconds,
+    raw_strict: s.rawByPass?.strict ?? null,
+    raw_balanced: s.rawByPass?.balanced ?? null,
+    raw_sensitive: s.rawByPass?.sensitive ?? null,
+    merged_candidates: s.mergedCandidates ?? null,
+    teaching_candidates: s.teachingCandidates ?? null,
+    rejected_as_noise: s.rejectedAsNoise ?? null,
+    sensitive_only: s.sensitiveOnly ?? null,
+    playable_notes: s.playableNotes ?? result.notes?.length ?? null,
+    onset_groups: s.onsetGroups ?? null,
+    high_confidence: s.highConfidence ?? null,
+    uncertain: s.uncertain ?? null,
+    average_confidence: s.averageConfidence ?? null,
+    playable_notes_per_second: s.playablePerSecond ?? perSecond(result.notes?.length || 0, result.duration_seconds),
+    browser_user_agent: navigator.userAgent,
+    extra: {
+      benchmark_mode: result.benchmark.mode,
+      start_seconds: result.benchmark.startSeconds,
+      end_seconds: result.benchmark.endSeconds,
+      requested_duration_seconds: result.benchmark.requestedDurationSeconds,
+      local_browser_analysis: true,
+      audio_uploaded: false,
+      local_audio_retained: true,
+      guitar_ear: compactGuitarEar(s)
+    }
+  };
+
+  try {
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/transcription_diagnostics`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_PUBLISHABLE_KEY,
+        Authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=minimal'
+      },
+      body: JSON.stringify(row)
+    });
+
+    if (!response.ok) {
+      const message = await response.text();
+      console.warn('Diagnostic upload failed', response.status, message);
+      return { status: response.status, error: message || `HTTP ${response.status}` };
+    }
+
+    return { status: response.status, error: null };
+  } catch (error) {
+    const message = error?.message || String(error);
+    console.warn('Diagnostic upload failed', error);
+    return { status: 0, error: message };
+  }
+}
+
 async function endRecording() {
   if (!recorder || recorder.state !== 'recording') throw new Error('No active recording.');
 
@@ -226,6 +310,13 @@ async function endRecording() {
 
   const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
   const result = await analyseBlob(blob);
+  const diagnostic = await saveDiagnostic(result);
+  result.diagnostic = {
+    supabase_status: diagnostic.status,
+    supabase_error: diagnostic.error,
+    uploader: 'offscreen-phase2d'
+  };
+
   const localResult = {
     ...result,
     captured_audio_blob: blob,

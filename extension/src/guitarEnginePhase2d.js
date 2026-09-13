@@ -16,7 +16,6 @@ const ONSET_CLUSTER_SECONDS = 0.065;
 const SAME_NOTE_MERGE_SECONDS = 0.055;
 const GUITAR_EAR_ATTACK_MATCH_SECONDS = 0.18;
 const GUITAR_EAR_ACTIVE_PAD_SECONDS = 0.08;
-const GUITAR_EAR_STRONG_FALLBACK_CONFIDENCE = 0.88;
 
 const PASSES = [
   { id: 'strict', onset: 0.40, frame: 0.28, minFrames: 5, energyTolerance: 10 },
@@ -135,13 +134,6 @@ function nearestAttackDistance(anchor, attacks) {
   return Number.isFinite(nearest) ? nearest : null;
 }
 
-function strongClusterFallback(cluster) {
-  return cluster.notes.some(note =>
-    Number(note.confidence || 0) >= GUITAR_EAR_STRONG_FALLBACK_CONFIDENCE &&
-    Number(note.consensus || 0) >= 0.999
-  );
-}
-
 function applyGuitarEarGate(clusters, guitarEar) {
   const preCount = clusters.length;
   if (!guitarEar?.available) {
@@ -149,13 +141,14 @@ function applyGuitarEarGate(clusters, guitarEar) {
       clusters,
       stats: {
         enabled: false,
+        mode: 'disabled',
         preGateOnsetGroups: preCount,
         postGateOnsetGroups: preCount,
         gateRejectedGroups: 0,
         rejectedOutsideActiveRegions: 0,
         rejectedWithoutAttackSupport: 0,
         attackMatchedGroups: 0,
-        strongFallbackGroups: 0,
+        presenceOnlyGroups: 0,
       },
     };
   }
@@ -164,10 +157,12 @@ function applyGuitarEarGate(clusters, guitarEar) {
   const attacks = (guitarEar.attackTimes || []).map(Number);
   const kept = [];
   let attackMatched = 0;
-  let fallback = 0;
+  let presenceOnly = 0;
   let rejectedInactive = 0;
-  let rejectedNoAttack = 0;
 
+  // Phase-2d presence is the hard gate. The attack head is intentionally
+  // supporting evidence only: requiring an attack match for every Basic Pitch
+  // onset fragments sustained/melodic guitar into isolated bursts.
   for (const original of clusters) {
     const anchor = Number(original.anchor);
     if (!inActiveInterval(anchor, intervals)) {
@@ -179,29 +174,24 @@ function applyGuitarEarGate(clusters, guitarEar) {
     if (distance !== null && distance <= GUITAR_EAR_ATTACK_MATCH_SECONDS) {
       kept.push({ ...original, guitarEarSupport: 'attack', guitarEarAttackDistance: distance });
       attackMatched += 1;
-      continue;
+    } else {
+      kept.push({ ...original, guitarEarSupport: 'presence' });
+      presenceOnly += 1;
     }
-
-    if (strongClusterFallback(original)) {
-      kept.push({ ...original, guitarEarSupport: 'strong-basic-pitch-fallback' });
-      fallback += 1;
-      continue;
-    }
-
-    rejectedNoAttack += 1;
   }
 
   return {
     clusters: kept,
     stats: {
       enabled: true,
+      mode: 'presence-first',
       preGateOnsetGroups: preCount,
       postGateOnsetGroups: kept.length,
       gateRejectedGroups: preCount - kept.length,
       rejectedOutsideActiveRegions: rejectedInactive,
-      rejectedWithoutAttackSupport: rejectedNoAttack,
+      rejectedWithoutAttackSupport: 0,
       attackMatchedGroups: attackMatched,
-      strongFallbackGroups: fallback,
+      presenceOnlyGroups: presenceOnly,
       attackMatchWindowSeconds: GUITAR_EAR_ATTACK_MATCH_SECONDS,
       activeRegionPaddingSeconds: GUITAR_EAR_ACTIVE_PAD_SECONDS,
     },

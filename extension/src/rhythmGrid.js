@@ -19,6 +19,10 @@ function noteScore(note) {
     + Number(note.amplitude || 0) * 0.10;
 }
 
+function maxConfidence(cluster) {
+  return (cluster.notes || []).reduce((m, n) => Math.max(m, Number(n.confidence || 0)), 0);
+}
+
 function mergeStrokeNotes(clusters, strokeTime) {
   const byMidi = new Map();
 
@@ -56,7 +60,7 @@ function mergeStrokeNotes(clusters, strokeTime) {
     .sort((a, b) => Number(b.confidence || 0) - Number(a.confidence || 0) || Number(a.midi) - Number(b.midi));
 }
 
-function mergeStrokeClusters(clusters, strokeTime, pulseIndex) {
+function mergeStrokeClusters(clusters, strokeTime, pulseIndex, subdivision) {
   const representative = clusters.reduce((best, candidate) => (
     !best || clusterScore(candidate, strokeTime) > clusterScore(best, strokeTime)
       ? candidate
@@ -77,13 +81,21 @@ function mergeStrokeClusters(clusters, strokeTime, pulseIndex) {
     notes,
     guitarEarSupport: strongestSupport || representative?.guitarEarSupport,
     ...(attackDistances.length ? { guitarEarAttackDistance: Math.min(...attackDistances) } : {}),
-    rhythmSlot: pulseIndex,
+    rhythmSlot: pulseIndex * 2 + subdivision,
     rhythmSlotTime: strokeTime,
     rhythmBeatIndex: pulseIndex,
-    rhythmSubdivision: 0,
+    rhythmSubdivision: subdivision,
     rhythmErrorSeconds: Number(representative?.anchor || strokeTime) - strokeTime,
     rhythmMergedClusterCount: clusters.length,
   };
+}
+
+function keepSecondaryStroke(cluster) {
+  const confidence = maxConfidence(cluster);
+  if (cluster.guitarEarSupport === 'attack') return confidence >= 0.62;
+  if (cluster.guitarEarSupport === 'presence') return confidence >= 0.72;
+  if (cluster.guitarEarSupport === 'uncertain-presence') return confidence >= 0.80;
+  return confidence >= 0.82;
 }
 
 export function applyTempoGrid(clusters, tempo) {
@@ -106,28 +118,65 @@ export function applyTempoGrid(clusters, tempo) {
 
   const pulseBpm = Number(tempo.pulseBpm);
   const pulseSeconds = 60 / pulseBpm;
+  const halfSlotSeconds = pulseSeconds / 2;
   const phase = Number(tempo.phaseSeconds || 0);
-  const byPulse = new Map();
+  const byHalfSlot = new Map();
 
-  // A guitar stroke is a musical event, not every Basic Pitch onset candidate.
-  // Quantize to one stroke per detected pulse. All candidates landing on the
-  // same pulse are merged into one chord/melody event rather than emitted as
-  // separate attacks at half-pulse subdivisions.
+  // Start with the two musically useful half-pulse positions, but do not emit
+  // both automatically. Candidates within the same half-pulse are merged first.
   for (const cluster of clusters) {
     const anchor = Number(cluster.anchor || 0);
-    const pulseIndex = Math.round((anchor - phase) / pulseSeconds);
-    if (!byPulse.has(pulseIndex)) byPulse.set(pulseIndex, []);
-    byPulse.get(pulseIndex).push(cluster);
+    const slotIndex = Math.round((anchor - phase) / halfSlotSeconds);
+    if (!byHalfSlot.has(slotIndex)) byHalfSlot.set(slotIndex, []);
+    byHalfSlot.get(slotIndex).push(cluster);
   }
 
-  const selected = [...byPulse.entries()]
-    .map(([pulseIndex, pulseClusters]) => {
-      const rawStrokeTime = phase + Number(pulseIndex) * pulseSeconds;
-      const strokeTime = Math.max(0, rawStrokeTime);
-      return mergeStrokeClusters(pulseClusters, strokeTime, Number(pulseIndex));
-    })
-    .filter(cluster => cluster.notes?.length)
-    .sort((a, b) => Number(a.anchor) - Number(b.anchor));
+  const halfSlotStrokes = [...byHalfSlot.entries()].map(([slotIndex, slotClusters]) => {
+    const pulseIndex = Math.floor(Number(slotIndex) / 2);
+    const subdivision = ((Number(slotIndex) % 2) + 2) % 2;
+    const rawStrokeTime = phase + Number(slotIndex) * halfSlotSeconds;
+    const strokeTime = Math.max(0, rawStrokeTime);
+    return mergeStrokeClusters(slotClusters, strokeTime, pulseIndex, subdivision);
+  }).filter(cluster => cluster.notes?.length);
+
+  const byPulse = new Map();
+  for (const stroke of halfSlotStrokes) {
+    const pulseIndex = Number(stroke.rhythmBeatIndex);
+    if (!byPulse.has(pulseIndex)) byPulse.set(pulseIndex, []);
+    byPulse.get(pulseIndex).push(stroke);
+  }
+
+  const selected = [];
+  let primaryStrokeCount = 0;
+  let secondaryCandidateCount = 0;
+  let secondaryStrokeCount = 0;
+  let secondaryRejectedCount = 0;
+
+  for (const pulseStrokes of byPulse.values()) {
+    if (pulseStrokes.length === 1) {
+      selected.push(pulseStrokes[0]);
+      primaryStrokeCount += 1;
+      continue;
+    }
+
+    const ranked = [...pulseStrokes].sort((a, b) =>
+      clusterScore(b, Number(b.rhythmSlotTime)) - clusterScore(a, Number(a.rhythmSlotTime))
+    );
+    selected.push(ranked[0]);
+    primaryStrokeCount += 1;
+
+    for (const secondary of ranked.slice(1)) {
+      secondaryCandidateCount += 1;
+      if (keepSecondaryStroke(secondary)) {
+        selected.push(secondary);
+        secondaryStrokeCount += 1;
+      } else {
+        secondaryRejectedCount += 1;
+      }
+    }
+  }
+
+  selected.sort((a, b) => Number(a.anchor) - Number(b.anchor));
 
   const pulseCount = Math.max(1, (Number(tempo.durationSeconds || 0) * pulseBpm) / 60);
   const mergedInputGroups = selected.reduce(
@@ -139,16 +188,27 @@ export function applyTempoGrid(clusters, tempo) {
     clusters: selected,
     stats: {
       enabled: true,
-      mode: 'tempo-stroke-merge-v2',
+      mode: 'tempo-adaptive-stroke-v3',
       preRhythmOnsetGroups: preCount,
       postRhythmOnsetGroups: selected.length,
       mergedByRhythm: preCount - selected.length,
       mergedInputGroups,
-      slotsPerPulse: 1,
-      slotSeconds: pulseSeconds,
+      slotsPerPulse: 2,
+      slotSeconds: halfSlotSeconds,
+      pulseSeconds,
       pulseBpm,
       phaseSeconds: phase,
-      maxOneStrokePerPulse: true,
+      maxStrokesPerPulse: 2,
+      adaptiveSecondaryStroke: true,
+      primaryStrokeCount,
+      secondaryCandidateCount,
+      secondaryStrokeCount,
+      secondaryRejectedCount,
+      secondaryThresholds: {
+        attack: 0.62,
+        presence: 0.72,
+        uncertainPresence: 0.80,
+      },
       onsetGroupsPerPulse: selected.length / pulseCount,
       averageInputGroupsPerStroke: selected.length ? preCount / selected.length : 0,
     },

@@ -2,6 +2,9 @@ name: Build Chrome extension
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - 'RUN_PHASE2E_VALIDATION'
 
 concurrency:
   group: build-extension-${{ github.ref }}
@@ -44,7 +47,7 @@ jobs:
         working-directory: extension
         run: node scripts/patch-tempo-offscreen-v050.mjs
 
-      - name: Apply v0.5.1 Phase-2e rhythm-grid engine patch
+      - name: Apply v0.5.2 Phase-2e rhythm-grid engine patch
         working-directory: extension
         run: node scripts/patch-tempo-engine-link-v050.mjs
 
@@ -89,7 +92,7 @@ jobs:
           node - <<'NODE'
           const fs = require('fs');
           const m = JSON.parse(fs.readFileSync('extension-package/manifest.json', 'utf8'));
-          if (m.version !== '0.5.1') throw new Error(`expected v0.5.1, got ${m.version}`);
+          if (m.version !== '0.5.2') throw new Error(`expected v0.5.2, got ${m.version}`);
           const forbidden = ['http://127.0.0.1/*', 'http://localhost/*'];
           for (const permission of forbidden) {
             if ((m.host_permissions || []).includes(permission)) throw new Error(`localhost permission must not be packaged: ${permission}`);
@@ -105,11 +108,14 @@ jobs:
             'overlap-frame-presence-rhythm-conditioned-v1',
             'Guitar Ear Phase-2e is listening with rhythm conditioning in Chrome',
             'guitar-ear-v0.2e-rhythm+basic-pitch-ensemble-v3-browser',
-            'guitar-ear-v0.2d-hardneg.best.pt','browser-wasm','chrome-extension-browser'
+            'guitar-ear-v0.2d-hardneg.best.pt','browser-wasm','chrome-extension-browser',
+            '3c900167abcf4157f4e9acee1bdf85f9c870c64fd454d14d67297f2523681911',
+            'Phase-2e ONNX/WASM session failed after verified model load',
+            'graphOptimizationLevel','model_fallback_reason','model_sha256'
           ]) {
-            if (!bundle.includes(marker)) throw new Error(`missing v0.5.1 marker: ${marker}`);
+            if (!bundle.includes(marker)) throw new Error(`missing v0.5.2 marker: ${marker}`);
           }
-          console.log('PHASE2E_SOURCE_PACKAGE_OK v0.5.1');
+          console.log('PHASE2E_SOURCE_PACKAGE_OK v0.5.2');
           NODE
 
           node --check extension-package/service_worker.js
@@ -128,6 +134,6 @@ jobs:
       - name: Upload source-validation extension
         uses: actions/upload-artifact@v4
         with:
-          name: youtube-music-notes-chrome-extension-phase2e-source-v0.5.1
+          name: youtube-music-notes-chrome-extension-phase2e-source-v0.5.2
           path: extension-package/
           if-no-files-found: error

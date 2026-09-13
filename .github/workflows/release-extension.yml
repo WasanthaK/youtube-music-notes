@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'RELEASE_V0_4_6'
+      - 'RELEASE_V0_4_7'
 
 permissions:
   contents: write
@@ -27,7 +27,7 @@ jobs:
         working-directory: extension
         run: npm install
 
-      - name: Build browser transcription bundle
+      - name: Build extension offscreen bundle
         working-directory: extension
         run: npm run build
 
@@ -35,7 +35,7 @@ jobs:
         run: |
           set -euo pipefail
           VERSION=$(node -p "require('./extension/manifest.json').version")
-          test "$VERSION" = "0.4.6"
+          test "$VERSION" = "0.4.7"
           mkdir -p extension-package/dist
           cp extension/manifest.json extension-package/
           cp extension/offscreen.html extension-package/
@@ -47,31 +47,38 @@ jobs:
           cp extension/result.css extension-package/
           cp extension/original-audio.js extension-package/
           cp extension/critic.js extension-package/
+          cp extension/diagnostic-upload.js extension-package/
           cp extension/service_worker.js extension-package/
           cp extension/dist/offscreen.bundle.js extension-package/dist/
-          node -e "const m=JSON.parse(require('fs').readFileSync('extension-package/manifest.json','utf8')); if(m.version!=='0.4.6') process.exit(1); console.log('manifest version',m.version)"
+          node -e "const m=JSON.parse(require('fs').readFileSync('extension-package/manifest.json','utf8')); if(m.version!=='0.4.7') process.exit(1); console.log('manifest version',m.version)"
           node --check extension-package/original-audio.js
           node --check extension-package/result.js
-          (cd extension-package && zip -r ../youtube-music-notes-v0.4.6.zip .)
+          node --check extension-package/diagnostic-upload.js
+          grep -Fq '127.0.0.1:8765/transcribe' extension-package/dist/offscreen.bundle.js
+          if grep -Fq 'guitar-basic-pitch-ensemble-v1.2' extension-package/dist/offscreen.bundle.js; then
+            echo 'ERROR: release bundle still contains legacy browser-only transcription engine' >&2
+            exit 1
+          fi
+          (cd extension-package && zip -r ../youtube-music-notes-v0.4.7.zip .)
 
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if gh release view v0.4.6 >/dev/null 2>&1; then
-            gh release upload v0.4.6 youtube-music-notes-v0.4.6.zip --clobber
+          if gh release view v0.4.7 >/dev/null 2>&1; then
+            gh release upload v0.4.7 youtube-music-notes-v0.4.7.zip --clobber
           else
-            gh release create v0.4.6 youtube-music-notes-v0.4.6.zip \
+            gh release create v0.4.7 youtube-music-notes-v0.4.7.zip \
               --target "$GITHUB_SHA" \
-              --title "YouTube Music Notes v0.4.6" \
-              --notes-file RELEASE_NOTES_v0.4.6.md
+              --title "YouTube Music Notes v0.4.7" \
+              --notes-file RELEASE_NOTES_v0.4.7.md
           fi
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: youtube-music-notes-v0.4.6
-          path: youtube-music-notes-v0.4.6.zip
+          name: youtube-music-notes-v0.4.7
+          path: youtube-music-notes-v0.4.7.zip
           if-no-files-found: error
           retention-days: 90

@@ -1,8 +1,43 @@
+const DB_NAME = 'youtube-music-notes-extension';
+const STORE_NAME = 'analysis';
+
 let recorder = null;
 let chunks = [];
 let mediaStream = null;
 let audioContext = null;
 let captureMeta = null;
+
+function openDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(STORE_NAME)) request.result.createObjectStore(STORE_NAME);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function saveAnalysisResult(result) {
+  const db = await openDb();
+  try {
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      tx.objectStore(STORE_NAME).put(result, 'latest');
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted.'));
+    });
+  } finally {
+    db.close();
+  }
+}
+
+async function reportProgress(captureMessage) {
+  try {
+    await chrome.runtime.sendMessage({ type: 'ANALYSIS_PROGRESS', captureMessage });
+  } catch {}
+}
 
 async function beginRecording(message) {
   if (recorder?.state === 'recording') throw new Error('A recording is already in progress.');
@@ -52,36 +87,49 @@ async function endRecording() {
   if (Number.isFinite(captureMeta.endSeconds)) form.append('end_seconds', String(captureMeta.endSeconds));
   if (Number.isFinite(captureMeta.requestedDurationSeconds)) form.append('requested_duration_seconds', String(captureMeta.requestedDurationSeconds));
 
+  await reportProgress('Sending captured audio to Guitar Ear Phase-2d…');
   const response = await fetch('http://127.0.0.1:8765/transcribe', { method: 'POST', body: form });
   if (!response.ok) {
     const body = await response.text();
     throw new Error(`Transcription server returned ${response.status}: ${body.slice(0, 240)}`);
   }
 
-  const result = await response.json();
-  await chrome.runtime.sendMessage({
-    type: 'ANALYSIS_READY',
-    result: {
-      ...result,
-      benchmark: captureMeta.videoId ? {
-        videoId: captureMeta.videoId,
-        videoUrl: captureMeta.videoUrl,
-        startSeconds: captureMeta.startSeconds,
-        endSeconds: captureMeta.endSeconds,
-        requestedDurationSeconds: captureMeta.requestedDurationSeconds
-      } : null
-    }
-  });
+  const backendResult = await response.json();
+  const result = {
+    ...backendResult,
+    benchmark: backendResult.benchmark || (captureMeta.videoId ? {
+      videoId: captureMeta.videoId,
+      videoUrl: captureMeta.videoUrl,
+      startSeconds: captureMeta.startSeconds,
+      endSeconds: captureMeta.endSeconds,
+      requestedDurationSeconds: captureMeta.requestedDurationSeconds
+    } : null)
+  };
+
+  const localResult = {
+    ...result,
+    captured_audio_blob: blob,
+    captured_audio_mime_type: blob.type || 'audio/webm',
+    captured_audio_size_bytes: blob.size,
+    captured_audio_local_only: true
+  };
+  await saveAnalysisResult(localResult);
+  await chrome.runtime.sendMessage({ type: 'ANALYSIS_READY', result });
 
   chunks = [];
   recorder = null;
   mediaStream = null;
   audioContext = null;
+  captureMeta = null;
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.target !== 'offscreen') return;
   (async () => {
+    if (message.type === 'PING') {
+      sendResponse({ ok: true });
+      return;
+    }
     if (message.type === 'BEGIN_RECORDING') await beginRecording(message);
     else if (message.type === 'END_RECORDING') await endRecording();
     sendResponse({ ok: true });

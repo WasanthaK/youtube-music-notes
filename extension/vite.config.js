@@ -11,7 +11,7 @@ export default defineConfig({
     emptyOutDir: true,
     minify: true,
     lib: {
-      entry: resolve(__dirname, 'src/offscreen-browser.js'),
+      entry: resolve(__dirname, 'offscreen.js'),
       name: 'YouTubeMusicNotesOffscreen',
       formats: ['iife'],
       fileName: () => 'offscreen.bundle.js'

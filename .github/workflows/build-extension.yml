@@ -30,7 +30,7 @@ jobs:
         working-directory: extension
         run: npm install
 
-      - name: Build browser transcription bundle
+      - name: Build extension offscreen bundle
         working-directory: extension
         run: npm run build
 
@@ -47,19 +47,29 @@ jobs:
           cp extension/result.css extension-package/
           cp extension/original-audio.js extension-package/
           cp extension/critic.js extension-package/
+          cp extension/diagnostic-upload.js extension-package/
           cp extension/service_worker.js extension-package/
           cp extension/dist/offscreen.bundle.js extension-package/dist/
 
       - name: Validate extension package
         run: |
+          set -euo pipefail
           test -f extension-package/manifest.json
           test -f extension-package/service_worker.js
           test -f extension-package/original-audio.js
           test -f extension-package/critic.js
+          test -f extension-package/diagnostic-upload.js
           test -f extension-package/dist/offscreen.bundle.js
           node -e "JSON.parse(require('fs').readFileSync('extension-package/manifest.json','utf8')); console.log('manifest.json OK')"
           node --check extension-package/original-audio.js
           node --check extension-package/result.js
+          node --check extension-package/diagnostic-upload.js
+          grep -Fq '127.0.0.1:8765/transcribe' extension-package/dist/offscreen.bundle.js
+          if grep -Fq 'guitar-basic-pitch-ensemble-v1.2' extension-package/dist/offscreen.bundle.js; then
+            echo 'ERROR: packaged offscreen bundle still contains legacy browser-only transcription engine' >&2
+            exit 1
+          fi
+          echo 'Packaged offscreen bundle routes to the Phase-2d backend.'
 
       - name: Upload ready-to-load extension
         uses: actions/upload-artifact@v4

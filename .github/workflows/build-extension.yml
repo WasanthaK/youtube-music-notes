@@ -1,12 +1,6 @@
 name: Build Chrome extension
 
 on:
-  push:
-    branches: [main, browser-phase2d-onnx]
-    paths:
-      - 'extension/**'
-      - 'web/src/guitarEngine.js'
-      - '.github/workflows/build-extension.yml'
   workflow_dispatch:
 
 concurrency:

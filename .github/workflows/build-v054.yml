@@ -1,4 +1,4 @@
-name: Build v0.5.5 adaptive 90s louder playback
+name: Build v0.5.6 adaptive 90s musical playback
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-v055-${{ github.ref }}
+  group: build-v056-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -49,6 +49,9 @@ jobs:
       - name: Apply louder playback
         working-directory: extension
         run: node scripts/patch-playback-volume-v055.mjs
+      - name: Apply musical playback
+        working-directory: extension
+        run: node scripts/patch-musical-playback-v056.mjs
       - name: Build bundle
         working-directory: extension
         run: npm run build
@@ -77,6 +80,6 @@ jobs:
           cp -R extension/dist/ort extension-package/dist/ort
       - uses: actions/upload-artifact@v4
         with:
-          name: youtube-music-notes-v0.5.5-adaptive-90s-louder-playback
+          name: youtube-music-notes-v0.5.6-adaptive-90s-musical-playback
           path: extension-package/
           if-no-files-found: error

@@ -1,8 +1,9 @@
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 
 const read = path => fs.readFileSync(path, 'utf8');
 const manifest = JSON.parse(read('manifest.json'));
-if (manifest.version !== '0.5.5') throw new Error(`expected v0.5.5, got ${manifest.version}`);
+if (manifest.version !== '0.5.6') throw new Error(`expected v0.5.6, got ${manifest.version}`);
 
 const popup = read('popup.js');
 if (!popup.includes('const BENCHMARK_START_SECONDS = 0;')) throw new Error('capture must start at 0s');
@@ -13,9 +14,13 @@ const clean = read('clean-playback.js');
 for (const marker of [
   "playClean('all', 90)", "playClean('lead', 90)", "playClean('bridged', 90)", 'showLocalGapSummary(90)',
   "mode === 'all' ? 0.82 : 1.02", '? 0.14 + confidence * 0.10', ': 0.22 + confidence * 0.14',
-  "compressor.threshold.setValueAtTime(-20, ctx.currentTime)"
+  "compressor.threshold.setValueAtTime(-20, ctx.currentTime)",
+  'rhythm-guitar-render-v1', 'violin-legato-render-v1',
+  'playRhythmGuitar(90)', 'playViolinLegato(90)',
+  'Rhythm guitar · 00:00–01:30', 'Violin legato · 00:00–01:30',
+  'alternating strum', 'sustained phrasing + vibrato'
 ]) {
-  if (!clean.includes(marker)) throw new Error(`missing clean playback marker: ${marker}`);
+  if (!clean.includes(marker)) throw new Error(`missing clean/musical playback marker: ${marker}`);
 }
 
 const original = read('original-audio.js');
@@ -32,6 +37,9 @@ for (const marker of [
   if (!result.includes(marker)) throw new Error(`missing detected playback marker: ${marker}`);
 }
 
+execFileSync(process.execPath, ['--check', 'clean-playback.js'], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--check', 'result.js'], { stdio: 'inherit' });
+
 const bundle = read('dist/offscreen.bundle.js');
 for (const marker of [
   'tempo-adaptive-stroke-v3', 'adaptiveSecondaryStroke', 'secondaryStrokeCount',
@@ -42,7 +50,7 @@ for (const marker of [
 }
 if (bundle.includes('127.0.0.1:8765/transcribe')) throw new Error('localhost transcription dependency must not be packaged');
 
-console.log('V055_VALIDATION_OK', {
+console.log('V056_VALIDATION_OK', {
   version: manifest.version,
   capture: '00:00-01:30',
   playbackSeconds: 90,
@@ -50,4 +58,5 @@ console.log('V055_VALIDATION_OK', {
   model: 'phase2d-stable',
   detectedPlayback: 'boosted-compressed',
   cleanPlayback: 'boosted-compressed',
+  musicalPlayback: ['rhythm-guitar-render-v1', 'violin-legato-render-v1'],
 });

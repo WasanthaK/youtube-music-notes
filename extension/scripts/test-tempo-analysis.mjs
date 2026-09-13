@@ -1,3 +1,24 @@
 import { analyzeTempoSamples } from '../src/tempoAnalysis.js';
-function track(bpm,s=24,sr=22050){const x=new Float32Array(s*sr);for(let t=.25;t<s;t+=60/bpm){const a=Math.round(t*sr);for(let i=0;i<180&&a+i<x.length;i++)x[a+i]+=Math.exp(-i/28)*(i%2?.7:-.7);}return [x,sr];}
-for(const bpm of [120,72]){const [x,sr]=track(bpm);const r=analyzeTempoSamples(x,sr);const expected=bpm<100?bpm*2:bpm;if(!r.available||Math.abs(r.pulseBpm-expected)>4||r.confidence<.25)throw new Error(`tempo test failed target=${bpm} got=${JSON.stringify(r)}`);console.log(`TEMPO_OK target=${bpm} pulse=${r.pulseBpm} confidence=${r.confidence}`);}
+
+function track(bpm, seconds = 24, sampleRate = 22050) {
+  const x = new Float32Array(seconds * sampleRate);
+  for (let t = 0.25; t < seconds; t += 60 / bpm) {
+    const a = Math.round(t * sampleRate);
+    for (let i = 0; i < 180 && a + i < x.length; i += 1) {
+      x[a + i] += Math.exp(-i / 28) * (i % 2 ? 0.7 : -0.7);
+    }
+  }
+  return [x, sampleRate];
+}
+
+for (const targetBpm of [120, 72]) {
+  const [x, sampleRate] = track(targetBpm);
+  const r = analyzeTempoSamples(x, sampleRate);
+  const tempoMatches = Math.abs(r.bpm - targetBpm) <= 4 || Math.abs(r.pulseBpm - targetBpm) <= 4;
+  const expectedSlotSeconds = 60 / (targetBpm * 2);
+  const slotMatches = Math.abs(r.suggestedSlotSeconds - expectedSlotSeconds) <= 0.03;
+  if (!r.available || !tempoMatches || !slotMatches || r.confidence < 0.25) {
+    throw new Error(`tempo test failed target=${targetBpm} got=${JSON.stringify(r)}`);
+  }
+  console.log(`TEMPO_OK target=${targetBpm} bpm=${r.bpm} pulse=${r.pulseBpm} slot=${r.suggestedSlotSeconds} confidence=${r.confidence}`);
+}

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'RUN_PHASE2E_VALIDATION'
+      - 'RUN_EXTENSION_VALIDATION'
 
 concurrency:
   group: build-extension-${{ github.ref }}
@@ -31,31 +31,35 @@ jobs:
         working-directory: extension
         run: npm install
 
-      - name: Test Phase-2e JS/Python rhythm parity
-        working-directory: extension
-        run: node scripts/test-guitar-ear-rhythm.mjs
-
       - name: Test tempo analyzer
         working-directory: extension
         run: node scripts/test-tempo-analysis.mjs
 
-      - name: Apply v0.4.12 soft presence patch
+      - name: Test tempo stroke merge
+        working-directory: extension
+        run: node scripts/test-rhythm-stroke-merge.mjs
+
+      - name: Apply soft presence patch
         working-directory: extension
         run: node scripts/patch-soft-presence-v0412.mjs
 
-      - name: Apply v0.5 tempo runtime patch
+      - name: Apply tempo runtime patch
         working-directory: extension
         run: node scripts/patch-tempo-offscreen-v050.mjs
 
-      - name: Apply v0.5.2 Phase-2e rhythm-grid engine patch
+      - name: Apply tempo-grid engine patch
         working-directory: extension
         run: node scripts/patch-tempo-engine-link-v050.mjs
+
+      - name: Pin stable Phase-2d model
+        working-directory: extension
+        run: node scripts/patch-stable-phase2d-v053.mjs
 
       - name: Build extension offscreen bundle
         working-directory: extension
         run: npm run build
 
-      - name: Prepare source-validation package
+      - name: Prepare extension package
         run: |
           set -euo pipefail
           mkdir -p extension-package/dist
@@ -77,7 +81,7 @@ jobs:
           cp -R extension/dist/models extension-package/dist/models
           cp -R extension/dist/ort extension-package/dist/ort
 
-      - name: Validate Phase-2e source package
+      - name: Validate stable v0.5.3 package
         run: |
           set -euo pipefail
           test -f extension-package/manifest.json
@@ -92,7 +96,7 @@ jobs:
           node - <<'NODE'
           const fs = require('fs');
           const m = JSON.parse(fs.readFileSync('extension-package/manifest.json', 'utf8'));
-          if (m.version !== '0.5.2') throw new Error(`expected v0.5.2, got ${m.version}`);
+          if (m.version !== '0.5.3') throw new Error(`expected v0.5.3, got ${m.version}`);
           const forbidden = ['http://127.0.0.1/*', 'http://localhost/*'];
           for (const permission of forbidden) {
             if ((m.host_permissions || []).includes(permission)) throw new Error(`localhost permission must not be packaged: ${permission}`);
@@ -103,19 +107,13 @@ jobs:
           const bundle = fs.readFileSync('extension-package/dist/offscreen.bundle.js', 'utf8');
           for (const marker of [
             'presence-soft-fallback-v1','uncertain-presence','spectral-flux-autocorrelation-v1',
-            'tempo-grid-v1','browser-tempo-v1','Learning tempo and beat grid in Chrome',
-            'guitar-ear-v0.2e-rhythm-core.onnx','phase2e-rhythm',
-            'overlap-frame-presence-rhythm-conditioned-v1',
-            'Guitar Ear Phase-2e is listening with rhythm conditioning in Chrome',
-            'guitar-ear-v0.2e-rhythm+basic-pitch-ensemble-v3-browser',
-            'guitar-ear-v0.2d-hardneg.best.pt','browser-wasm','chrome-extension-browser',
-            '3c900167abcf4157f4e9acee1bdf85f9c870c64fd454d14d67297f2523681911',
-            'Phase-2e ONNX/WASM session failed after verified model load',
-            'graphOptimizationLevel','model_fallback_reason','model_sha256'
+            'tempo-stroke-merge-v2','maxOneStrokePerPulse','browser-tempo-v1',
+            'Learning tempo and beat grid in Chrome','phase2d-stable',
+            'guitar-ear-v0.2d-hardneg.best.pt','browser-wasm','chrome-extension-browser'
           ]) {
-            if (!bundle.includes(marker)) throw new Error(`missing v0.5.2 marker: ${marker}`);
+            if (!bundle.includes(marker)) throw new Error(`missing stable v0.5.3 marker: ${marker}`);
           }
-          console.log('PHASE2E_SOURCE_PACKAGE_OK v0.5.2');
+          console.log('STABLE_TEMPO_STROKE_PACKAGE_OK v0.5.3');
           NODE
 
           node --check extension-package/service_worker.js
@@ -127,13 +125,13 @@ jobs:
           grep -Fq 'uploadDiagnosticFromResult' extension-package/service_worker.js
           grep -Fq 'clean-playback.js' extension-package/result.html
           if grep -Fq '127.0.0.1:8765/transcribe' extension-package/dist/offscreen.bundle.js; then
-            echo 'ERROR: packaged offscreen bundle still depends on the localhost Python backend' >&2
+            echo 'ERROR: packaged offscreen bundle still depends on localhost Python backend' >&2
             exit 1
           fi
 
-      - name: Upload source-validation extension
+      - name: Upload extension
         uses: actions/upload-artifact@v4
         with:
-          name: youtube-music-notes-chrome-extension-phase2e-source-v0.5.2
+          name: youtube-music-notes-chrome-extension-v0.5.3-tempo-stroke-merge
           path: extension-package/
           if-no-files-found: error

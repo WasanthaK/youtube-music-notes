@@ -30,9 +30,21 @@ jobs:
         working-directory: extension
         run: npm install
 
-      - name: Apply v0.4.12 soft presence test patch
+      - name: Test tempo analyzer
+        working-directory: extension
+        run: node scripts/test-tempo-analysis.mjs
+
+      - name: Apply v0.4.12 soft presence patch
         working-directory: extension
         run: node scripts/patch-soft-presence-v0412.mjs
+
+      - name: Apply v0.5 tempo runtime patch
+        working-directory: extension
+        run: node scripts/patch-tempo-offscreen-v050.mjs
+
+      - name: Apply v0.5 rhythm-grid engine patch
+        working-directory: extension
+        run: node scripts/patch-tempo-engine-link-v050.mjs
 
       - name: Build extension offscreen bundle
         working-directory: extension
@@ -80,7 +92,7 @@ jobs:
           node - <<'NODE'
           const fs = require('fs');
           const m = JSON.parse(fs.readFileSync('extension-package/manifest.json', 'utf8'));
-          if (m.version !== '0.4.12') throw new Error(`expected v0.4.12, got ${m.version}`);
+          if (m.version !== '0.5.0') throw new Error(`expected v0.5.0, got ${m.version}`);
           const forbidden = ['http://127.0.0.1/*', 'http://localhost/*'];
           for (const permission of forbidden) {
             if ((m.host_permissions || []).includes(permission)) throw new Error(`localhost permission must not be packaged: ${permission}`);
@@ -96,9 +108,11 @@ jobs:
           if (!worker.includes('Capture start drifted before playback')) throw new Error('Pre-play start verification is missing');
 
           const bundle = fs.readFileSync('extension-package/dist/offscreen.bundle.js', 'utf8');
-          if (!bundle.includes('presence-soft-fallback-v1')) throw new Error('Soft presence fallback missing');
-          if (!bundle.includes('uncertain-presence')) throw new Error('Uncertain-presence label missing');
-          console.log('v0.4.12 invariants OK: exact 30-60 capture + soft Guitar Ear continuity fallback');
+          for (const marker of ['presence-soft-fallback-v1','uncertain-presence','spectral-flux-autocorrelation-v1','tempo-grid-v1','browser-tempo-v1','Learning tempo and beat grid in Chrome']) {
+            if (!bundle.includes(marker)) throw new Error(`missing v0.5 marker: ${marker}`);
+          }
+          if (!bundle.includes('source:"chrome-extension-browser"') && !bundle.includes("source:'chrome-extension-browser'") && !bundle.includes('chrome-extension-browser')) throw new Error('automatic Supabase diagnostic source marker missing');
+          console.log('v0.5 invariants OK: exact 30-60 capture + auto diagnostics + tempo grid');
           NODE
 
           node --check extension-package/service_worker.js
@@ -115,7 +129,7 @@ jobs:
             echo 'ERROR: packaged offscreen bundle still depends on the localhost Python backend' >&2
             exit 1
           fi
-          echo 'Packaged extension runs v0.4.12 browser Phase-2d with exact benchmark capture and soft continuity fallback.'
+          echo 'Packaged extension runs v0.5 browser Phase-2d with tempo-aware onset control.'
 
       - name: Upload ready-to-load extension
         uses: actions/upload-artifact@v4

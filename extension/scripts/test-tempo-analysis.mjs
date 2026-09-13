@@ -1,0 +1,3 @@
+import { analyzeTempoSamples } from '../src/tempoAnalysis.js';
+function track(bpm,s=24,sr=22050){const x=new Float32Array(s*sr);for(let t=.25;t<s;t+=60/bpm){const a=Math.round(t*sr);for(let i=0;i<180&&a+i<x.length;i++)x[a+i]+=Math.exp(-i/28)*(i%2?.7:-.7);}return [x,sr];}
+for(const bpm of [120,72]){const [x,sr]=track(bpm);const r=analyzeTempoSamples(x,sr);const expected=bpm<100?bpm*2:bpm;if(!r.available||Math.abs(r.pulseBpm-expected)>4||r.confidence<.25)throw new Error(`tempo test failed target=${bpm} got=${JSON.stringify(r)}`);console.log(`TEMPO_OK target=${bpm} pulse=${r.pulseBpm} confidence=${r.confidence}`);}

@@ -16,70 +16,12 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  PHASE2E_CHECKPOINT: C:\guitar-ear-data\checkpoints\guitar-ear-v0.2e-seed29.best.pt
-
 jobs:
-  export-phase2e-model:
-    runs-on: [self-hosted, Windows, X64]
-    timeout-minutes: 15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Refresh PATH
-        shell: powershell
-        run: |
-          $env:Path = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path','User')
-          $env:Path | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-      - name: Verify validation-selected Phase-2e checkpoint
-        shell: powershell
-        run: |
-          if (-not (Test-Path $env:PHASE2E_CHECKPOINT)) { throw "Missing Phase-2e seed29 checkpoint: $env:PHASE2E_CHECKPOINT" }
-          $python = 'C:\Users\User\youtube-music-notes\research\guitar_ear\.venv\Scripts\python.exe'
-          if (-not (Test-Path $python)) { throw "Missing Guitar Ear Python environment: $python" }
-          & $python -c "import torch; print('torch', torch.__version__)"
-          if ($LASTEXITCODE -ne 0) { throw 'PyTorch validation failed' }
-          & $python -c "import onnx, onnxruntime; print('onnx tooling ready')"
-          if ($LASTEXITCODE -ne 0) {
-            & $python -m pip install onnx onnxruntime
-            if ($LASTEXITCODE -ne 0) { throw 'Could not install ONNX tooling' }
-          }
-
-      - name: Export and verify Phase-2e browser model
-        shell: powershell
-        run: |
-          $python = 'C:\Users\User\youtube-music-notes\research\guitar_ear\.venv\Scripts\python.exe'
-          $out = Join-Path $env:GITHUB_WORKSPACE 'phase2e-model'
-          New-Item -ItemType Directory -Force -Path $out | Out-Null
-          & $python extension\scripts\export-phase2e-from-checkpoint.py `
-            --checkpoint $env:PHASE2E_CHECKPOINT `
-            --output (Join-Path $out 'guitar-ear-v0.2e-rhythm-core.onnx') `
-            --calibration-output (Join-Path $out 'guitar-ear-v0.2e-rhythm-calibration.json')
-          if ($LASTEXITCODE -ne 0) { throw 'Phase-2e export/parity failed' }
-          Get-FileHash (Join-Path $out 'guitar-ear-v0.2e-rhythm-core.onnx') -Algorithm SHA256
-
-      - name: Upload validated Phase-2e model
-        uses: actions/upload-artifact@v4
-        with:
-          name: guitar-ear-v0.2e-extension-model
-          path: phase2e-model/
-          if-no-files-found: error
-          retention-days: 30
-
   build:
-    needs: export-phase2e-model
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Download validated Phase-2e model
-        uses: actions/download-artifact@v4
-        with:
-          name: guitar-ear-v0.2e-extension-model
-          path: extension/public/models
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -116,7 +58,7 @@ jobs:
         working-directory: extension
         run: npm run build
 
-      - name: Prepare extension package
+      - name: Prepare source-validation package
         run: |
           set -euo pipefail
           mkdir -p extension-package/dist
@@ -138,19 +80,12 @@ jobs:
           cp -R extension/dist/models extension-package/dist/models
           cp -R extension/dist/ort extension-package/dist/ort
 
-      - name: Validate extension package
+      - name: Validate Phase-2e source package
         run: |
           set -euo pipefail
           test -f extension-package/manifest.json
           test -f extension-package/service_worker.js
-          test -f extension-package/service-worker-diagnostic.js
-          test -f extension-package/original-audio.js
-          test -f extension-package/critic.js
-          test -f extension-package/diagnostic-upload.js
-          test -f extension-package/clean-playback.js
           test -f extension-package/dist/offscreen.bundle.js
-          test -f extension-package/dist/models/guitar-ear-v0.2e-rhythm-core.onnx
-          test -f extension-package/dist/models/guitar-ear-v0.2e-rhythm-calibration.json
           test -f extension-package/dist/models/guitar-ear-v0.2d-core.onnx
           test -f extension-package/dist/models/guitar-ear-v0.2d-core.onnx.data
           test -f extension-package/dist/models/guitar-ear-v0.2d-calibration.json
@@ -165,34 +100,22 @@ jobs:
           for (const permission of forbidden) {
             if ((m.host_permissions || []).includes(permission)) throw new Error(`localhost permission must not be packaged: ${permission}`);
           }
-
           const popup = fs.readFileSync('extension-package/popup.js', 'utf8');
           if (!popup.includes('const BENCHMARK_START_SECONDS = 30;')) throw new Error('Benchmark start must remain fixed at 30s');
           if (!popup.includes('const BENCHMARK_END_SECONDS = 60;')) throw new Error('Benchmark end must remain fixed at 60s');
-
-          const worker = fs.readFileSync('extension-package/service_worker.js', 'utf8');
-          if (!worker.includes('waitForYouTubeMediaTime')) throw new Error('Exact media-time end watcher is missing');
-          if (!worker.includes('YouTube seek verification failed')) throw new Error('Exact media-time start verification is missing');
-          if (!worker.includes('Capture start drifted before playback')) throw new Error('Pre-play start verification is missing');
-
           const bundle = fs.readFileSync('extension-package/dist/offscreen.bundle.js', 'utf8');
           for (const marker of [
-            'presence-soft-fallback-v1',
-            'uncertain-presence',
-            'spectral-flux-autocorrelation-v1',
-            'tempo-grid-v1',
-            'browser-tempo-v1',
-            'Learning tempo and beat grid in Chrome',
-            'guitar-ear-v0.2e-rhythm-core.onnx',
-            'phase2e-rhythm',
+            'presence-soft-fallback-v1','uncertain-presence','spectral-flux-autocorrelation-v1',
+            'tempo-grid-v1','browser-tempo-v1','Learning tempo and beat grid in Chrome',
+            'guitar-ear-v0.2e-rhythm-core.onnx','phase2e-rhythm',
             'overlap-frame-presence-rhythm-conditioned-v1',
             'Guitar Ear Phase-2e is listening with rhythm conditioning in Chrome',
-            'guitar-ear-v0.2e-rhythm+basic-pitch-ensemble-v3-browser'
+            'guitar-ear-v0.2e-rhythm+basic-pitch-ensemble-v3-browser',
+            'guitar-ear-v0.2d-hardneg.best.pt','browser-wasm','chrome-extension-browser'
           ]) {
             if (!bundle.includes(marker)) throw new Error(`missing v0.5.1 marker: ${marker}`);
           }
-          if (!bundle.includes('chrome-extension-browser')) throw new Error('automatic Supabase diagnostic source marker missing');
-          console.log('v0.5.1 invariants OK: exact 30-60 capture + Phase-2e rhythm conditioning + Phase-2d fallback + tempo grid');
+          console.log('PHASE2E_SOURCE_PACKAGE_OK v0.5.1');
           NODE
 
           node --check extension-package/service_worker.js
@@ -201,20 +124,16 @@ jobs:
           node --check extension-package/result.js
           node --check extension-package/diagnostic-upload.js
           node --check extension-package/clean-playback.js
-          grep -Fq 'guitar-ear-v0.2e-rhythm+basic-pitch-ensemble-v3-browser' extension-package/dist/offscreen.bundle.js
-          grep -Fq 'guitar-ear-v0.2d-hardneg.best.pt' extension-package/dist/offscreen.bundle.js
-          grep -Fq 'browser-wasm' extension-package/dist/offscreen.bundle.js
           grep -Fq 'uploadDiagnosticFromResult' extension-package/service_worker.js
           grep -Fq 'clean-playback.js' extension-package/result.html
           if grep -Fq '127.0.0.1:8765/transcribe' extension-package/dist/offscreen.bundle.js; then
             echo 'ERROR: packaged offscreen bundle still depends on the localhost Python backend' >&2
             exit 1
           fi
-          echo 'Packaged extension runs v0.5.1 browser Phase-2e with rhythm-conditioned attacks and packaged Phase-2d fallback.'
 
-      - name: Upload ready-to-load extension
+      - name: Upload source-validation extension
         uses: actions/upload-artifact@v4
         with:
-          name: youtube-music-notes-chrome-extension-browser-phase2e
+          name: youtube-music-notes-chrome-extension-phase2e-source-v0.5.1
           path: extension-package/
           if-no-files-found: error

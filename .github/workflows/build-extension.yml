@@ -9,6 +9,10 @@ on:
       - '.github/workflows/build-extension.yml'
   workflow_dispatch:
 
+concurrency:
+  group: build-extension-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -111,7 +115,7 @@ jobs:
           for (const marker of ['presence-soft-fallback-v1','uncertain-presence','spectral-flux-autocorrelation-v1','tempo-grid-v1','browser-tempo-v1','Learning tempo and beat grid in Chrome']) {
             if (!bundle.includes(marker)) throw new Error(`missing v0.5 marker: ${marker}`);
           }
-          if (!bundle.includes('source:"chrome-extension-browser"') && !bundle.includes("source:'chrome-extension-browser'") && !bundle.includes('chrome-extension-browser')) throw new Error('automatic Supabase diagnostic source marker missing');
+          if (!bundle.includes('chrome-extension-browser')) throw new Error('automatic Supabase diagnostic source marker missing');
           console.log('v0.5 invariants OK: exact 30-60 capture + auto diagnostics + tempo grid');
           NODE
 

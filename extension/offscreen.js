@@ -88,7 +88,14 @@ async function endRecording() {
   if (Number.isFinite(captureMeta.requestedDurationSeconds)) form.append('requested_duration_seconds', String(captureMeta.requestedDurationSeconds));
 
   await reportProgress('Sending captured audio to Guitar Ear Phase-2d…');
-  const response = await fetch('http://127.0.0.1:8765/transcribe', { method: 'POST', body: form });
+
+  let response;
+  try {
+    response = await fetch('http://127.0.0.1:8765/transcribe', { method: 'POST', body: form });
+  } catch (error) {
+    throw new Error(`Cannot reach the local Guitar Ear backend at 127.0.0.1:8765. Start the backend and verify its /health endpoint. ${error?.message || error}`);
+  }
+
   if (!response.ok) {
     const body = await response.text();
     throw new Error(`Transcription server returned ${response.status}: ${body.slice(0, 240)}`);

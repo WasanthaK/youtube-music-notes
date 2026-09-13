@@ -27,6 +27,7 @@ const WINDOW_STRIDE_SECONDS = SEGMENT_SECONDS / 2;
 const WINDOW_STRIDE_SAMPLES = Math.round(SAMPLE_RATE * WINDOW_STRIDE_SECONDS);
 
 const PHASE2E_MODEL_NAME = 'guitar-ear-v0.2e-rhythm-seed29.best.pt';
+const PHASE2E_MODEL_SHA256 = '3c900167abcf4157f4e9acee1bdf85f9c870c64fd454d14d67297f2523681911';
 const PHASE2E_MODEL_URL = () => chrome.runtime.getURL('dist/models/guitar-ear-v0.2e-rhythm-core.onnx');
 const PHASE2D_MODEL_NAME = 'guitar-ear-v0.2d-hardneg.best.pt';
 const PHASE2D_MODEL_URL = () => chrome.runtime.getURL('dist/models/guitar-ear-v0.2d-core.onnx');
@@ -38,6 +39,48 @@ let sessionPromise = null;
 
 const sigmoid = value => 1 / (1 + Math.exp(-value));
 
+function errorMessage(error) {
+  return error?.message || String(error);
+}
+
+async function sha256Hex(bytes) {
+  if (!globalThis.crypto?.subtle) throw new Error('Web Crypto SHA-256 is unavailable.');
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('');
+}
+
+async function fetchVerifiedPhase2eModel() {
+  const response = await fetch(PHASE2E_MODEL_URL(), { cache: 'no-store' });
+  if (!response.ok) throw new Error(`Phase-2e model fetch failed: HTTP ${response.status}.`);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (!bytes.byteLength) throw new Error('Phase-2e model fetch returned an empty file.');
+  const sha256 = await sha256Hex(bytes);
+  if (sha256 !== PHASE2E_MODEL_SHA256) {
+    throw new Error(`Phase-2e model SHA mismatch: expected ${PHASE2E_MODEL_SHA256}, got ${sha256}.`);
+  }
+  return { bytes, sha256 };
+}
+
+async function createPhase2eSession() {
+  const { bytes, sha256 } = await fetchVerifiedPhase2eModel();
+  const failures = [];
+  for (const graphOptimizationLevel of ['all', 'basic', 'disabled']) {
+    try {
+      const session = await ort.InferenceSession.create(bytes, {
+        executionProviders: ['wasm'],
+        graphOptimizationLevel,
+      });
+      if (!session.inputNames.includes('log_mel') || !session.inputNames.includes('rhythm')) {
+        throw new Error(`Unexpected Phase-2e inputs: ${session.inputNames.join(', ')}`);
+      }
+      return { session, sha256, graphOptimizationLevel };
+    } catch (error) {
+      failures.push(`${graphOptimizationLevel}: ${errorMessage(error)}`);
+    }
+  }
+  throw new Error(`Phase-2e ONNX/WASM session failed after verified model load. ${failures.join(' | ')}`);
+}
+
 async function createSessionBundle() {
   ort.env.wasm.numThreads = 1;
   ort.env.wasm.proxy = false;
@@ -47,17 +90,13 @@ async function createSessionBundle() {
   };
 
   try {
-    const session = await ort.InferenceSession.create(PHASE2E_MODEL_URL(), {
-      executionProviders: ['wasm'],
-      graphOptimizationLevel: 'all',
-    });
-    if (!session.inputNames.includes('log_mel') || !session.inputNames.includes('rhythm')) {
-      throw new Error(`Unexpected Phase-2e inputs: ${session.inputNames.join(', ')}`);
-    }
+    const phase2e = await createPhase2eSession();
     return {
-      session,
+      session: phase2e.session,
       phase: 'phase2e-rhythm',
       model: PHASE2E_MODEL_NAME,
+      modelSha256: phase2e.sha256,
+      graphOptimizationLevel: phase2e.graphOptimizationLevel,
       fallbackReason: null,
     };
   } catch (phase2eError) {
@@ -74,7 +113,9 @@ async function createSessionBundle() {
       session,
       phase: 'phase2d-fallback',
       model: PHASE2D_MODEL_NAME,
-      fallbackReason: phase2eError?.message || String(phase2eError),
+      modelSha256: null,
+      graphOptimizationLevel: 'all',
+      fallbackReason: errorMessage(phase2eError),
     };
   }
 }
@@ -142,6 +183,8 @@ function compactRhythmEstimate(rhythm) {
 export async function analyzeGuitarEar(audioBuffer) {
   let selectedModel = PHASE2E_MODEL_NAME;
   let selectedPhase = 'phase2e-rhythm';
+  let modelSha256 = null;
+  let graphOptimizationLevel = null;
   let fallbackReason = null;
   let rhythmEstimate = null;
   let attackThreshold = PHASE2E_ATTACK_THRESHOLD;
@@ -159,6 +202,8 @@ export async function analyzeGuitarEar(audioBuffer) {
     const { session } = bundle;
     selectedModel = bundle.model;
     selectedPhase = bundle.phase;
+    modelSha256 = bundle.modelSha256;
+    graphOptimizationLevel = bundle.graphOptimizationLevel;
     fallbackReason = bundle.fallbackReason;
 
     if (bundle.phase === 'phase2e-rhythm') {
@@ -284,6 +329,8 @@ export async function analyzeGuitarEar(audioBuffer) {
       phase2eAttackThreshold: PHASE2E_ATTACK_THRESHOLD,
       phase2dFallbackAttackThreshold: PHASE2D_ATTACK_THRESHOLD,
       rhythmConditioning: compactRhythmEstimate(rhythmEstimate),
+      modelSha256,
+      graphOptimizationLevel,
       modelFallbackReason: fallbackReason,
       meanPresence: presenceCount ? presenceSum / presenceCount : 0,
       activeFraction: activeFrameCount / Math.max(1, presenceCount),
@@ -311,6 +358,8 @@ export async function analyzeGuitarEar(audioBuffer) {
       phase2eAttackThreshold: PHASE2E_ATTACK_THRESHOLD,
       phase2dFallbackAttackThreshold: PHASE2D_ATTACK_THRESHOLD,
       rhythmConditioning: compactRhythmEstimate(rhythmEstimate),
+      modelSha256,
+      graphOptimizationLevel,
       modelFallbackReason: fallbackReason,
       meanPresence: null,
       activeFraction: null,
@@ -319,7 +368,7 @@ export async function analyzeGuitarEar(audioBuffer) {
       segmentScores: [],
       attackTimes: [],
       attackCount: 0,
-      error: error?.message || String(error),
+      error: errorMessage(error),
     };
   }
 }
@@ -337,4 +386,5 @@ export const guitarEarBrowserConfig = Object.freeze({
   presenceSegmentThreshold: PRESENCE_SEGMENT_THRESHOLD,
   phase2eAttackThreshold: PHASE2E_ATTACK_THRESHOLD,
   phase2dFallbackAttackThreshold: PHASE2D_ATTACK_THRESHOLD,
+  phase2eModelSha256: PHASE2E_MODEL_SHA256,
 });

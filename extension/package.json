@@ -4,10 +4,12 @@
   "version": "0.4.8",
   "type": "module",
   "scripts": {
-    "build": "vite build"
+    "build": "vite build && node scripts/copy-ort-assets.mjs"
   },
   "dependencies": {
-    "@spotify/basic-pitch": "1.0.1"
+    "@spotify/basic-pitch": "1.0.1",
+    "fft.js": "4.0.4",
+    "onnxruntime-web": "1.29.0"
   },
   "devDependencies": {
     "vite": "^6.2.0"

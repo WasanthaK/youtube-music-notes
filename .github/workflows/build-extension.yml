@@ -74,14 +74,25 @@ jobs:
           test -f extension-package/dist/ort/ort-wasm-simd-threaded.wasm
 
           node - <<'NODE'
-          const m = JSON.parse(require('fs').readFileSync('extension-package/manifest.json', 'utf8'));
+          const fs = require('fs');
+          const m = JSON.parse(fs.readFileSync('extension-package/manifest.json', 'utf8'));
           const forbidden = ['http://127.0.0.1/*', 'http://localhost/*'];
           for (const permission of forbidden) {
             if ((m.host_permissions || []).includes(permission)) {
               throw new Error(`localhost permission must not be packaged: ${permission}`);
             }
           }
-          console.log('manifest.json OK: no localhost backend permissions');
+
+          const popup = fs.readFileSync('extension-package/popup.js', 'utf8');
+          if (!popup.includes('const BENCHMARK_START_SECONDS = 30;')) throw new Error('Benchmark start must remain fixed at 30s');
+          if (!popup.includes('const BENCHMARK_END_SECONDS = 60;')) throw new Error('Benchmark end must remain fixed at 60s');
+
+          const worker = fs.readFileSync('extension-package/service_worker.js', 'utf8');
+          if (!worker.includes('waitForYouTubeMediaTime')) throw new Error('Exact media-time end watcher is missing');
+          if (!worker.includes('YouTube seek verification failed')) throw new Error('Exact media-time start verification is missing');
+          if (!worker.includes('Capture start drifted before playback')) throw new Error('Pre-play start verification is missing');
+
+          console.log('manifest/capture invariants OK: no localhost backend, fixed 30s→60s media-time benchmark');
           NODE
 
           node --check extension-package/service_worker.js
@@ -98,7 +109,7 @@ jobs:
             echo 'ERROR: packaged offscreen bundle still depends on the localhost Python backend' >&2
             exit 1
           fi
-          echo 'Packaged extension runs Guitar Ear Phase-2d in Chrome and includes clean/lead diagnostic playback.'
+          echo 'Packaged extension runs Guitar Ear Phase-2d in Chrome, preserves exact 0:30→1:00 capture, and includes clean/lead diagnostic playback.'
 
       - name: Upload ready-to-load extension
         uses: actions/upload-artifact@v4

@@ -14,6 +14,14 @@ const PRESENCE_SEGMENT_THRESHOLD = 0.375;
 const ATTACK_THRESHOLD = 0.55;
 const ATTACK_MIN_PEAK_DISTANCE_MS = 50;
 
+// The trained model still consumes the frozen 3-second input it was calibrated
+// on. Product inference now overlaps those windows by 50% and averages their
+// frame probabilities. This removes the hard 3-second on/off blocks that were
+// creating artificial silence in melodic passages without changing any frozen
+// model threshold.
+const WINDOW_STRIDE_SECONDS = SEGMENT_SECONDS / 2;
+const WINDOW_STRIDE_SAMPLES = Math.round(SAMPLE_RATE * WINDOW_STRIDE_SECONDS);
+
 const MODEL_NAME = 'guitar-ear-v0.2d-hardneg.best.pt';
 const MODEL_URL = () => chrome.runtime.getURL('dist/models/guitar-ear-v0.2d-core.onnx');
 const MODEL_DATA_URL = () => chrome.runtime.getURL('dist/models/guitar-ear-v0.2d-core.onnx.data');
@@ -64,6 +72,27 @@ function peakFrames(probabilities, threshold, minDistanceFrames) {
   return kept;
 }
 
+function frameActiveIntervals(probabilities, threshold, hopSeconds, duration) {
+  const intervals = [];
+  let startFrame = null;
+
+  const closeInterval = endFrameExclusive => {
+    if (startFrame === null) return;
+    const start = Math.max(0, startFrame * hopSeconds);
+    const end = Math.min(duration, endFrameExclusive * hopSeconds);
+    if (end > start) intervals.push({ start, end });
+    startFrame = null;
+  };
+
+  for (let frame = 0; frame < probabilities.length; frame += 1) {
+    const active = Number(probabilities[frame]) >= threshold;
+    if (active && startFrame === null) startFrame = frame;
+    if (!active && startFrame !== null) closeInterval(frame);
+  }
+  closeInterval(probabilities.length);
+  return intervals;
+}
+
 export async function analyzeGuitarEar(audioBuffer) {
   try {
     if (!audioBuffer || audioBuffer.sampleRate !== SAMPLE_RATE || audioBuffer.numberOfChannels < 1) {
@@ -76,16 +105,15 @@ export async function analyzeGuitarEar(audioBuffer) {
 
     const session = await getSession();
     const segmentScores = [];
-    const activeIntervals = [];
-    const attackTimes = [];
     const hopSeconds = HOP_LENGTH / SAMPLE_RATE;
     const minAttackFrames = Math.max(1, Math.round((ATTACK_MIN_PEAK_DISTANCE_MS / 1000) / hopSeconds));
-    let presenceSum = 0;
-    let presenceCount = 0;
+    const globalFrameCount = Math.max(1, 1 + Math.floor(audio.length / HOP_LENGTH));
+    const presenceSums = new Float64Array(globalFrameCount);
+    const attackSums = new Float64Array(globalFrameCount);
+    const frameCounts = new Uint16Array(globalFrameCount);
 
-    const segmentCount = Math.ceil(audio.length / SEGMENT_SAMPLES);
-    for (let index = 0; index < segmentCount; index += 1) {
-      const startSample = index * SEGMENT_SAMPLES;
+    let windowIndex = 0;
+    for (let startSample = 0; startSample < audio.length; startSample += WINDOW_STRIDE_SAMPLES) {
       const actualSamples = Math.min(SEGMENT_SAMPLES, audio.length - startSample);
       const chunk = new Float32Array(SEGMENT_SAMPLES);
       chunk.set(audio.subarray(startSample, startSample + actualSamples));
@@ -95,49 +123,83 @@ export async function analyzeGuitarEar(audioBuffer) {
       const output = await session.run({ log_mel: input });
       const presenceLogits = output.presence_logits.data;
       const attackLogits = output.attack_logits.data;
-      const isLast = index === segmentCount - 1;
+      const isLast = startSample + actualSamples >= audio.length;
       let validFrames = Math.min(N_FRAMES, 1 + Math.floor(actualSamples / HOP_LENGTH));
-      if (!isLast) validFrames = Math.max(1, validFrames - 1);
+      if (!isLast && actualSamples === SEGMENT_SAMPLES) validFrames = Math.max(1, validFrames - 1);
 
-      const attacks = new Float32Array(validFrames);
       let segmentPresenceSum = 0;
+      const globalStartFrame = Math.round(startSample / HOP_LENGTH);
       for (let frame = 0; frame < validFrames; frame += 1) {
         const p = sigmoid(Number(presenceLogits[frame]));
         const a = sigmoid(Number(attackLogits[frame]));
-        attacks[frame] = a;
         segmentPresenceSum += p;
-        presenceSum += p;
-        presenceCount += 1;
+
+        const globalFrame = globalStartFrame + frame;
+        if (globalFrame < globalFrameCount) {
+          presenceSums[globalFrame] += p;
+          attackSums[globalFrame] += a;
+          frameCounts[globalFrame] += 1;
+        }
       }
 
       const score = segmentPresenceSum / Math.max(1, validFrames);
-      const active = score >= PRESENCE_SEGMENT_THRESHOLD;
       const start = startSample / SAMPLE_RATE;
       const end = Math.min(duration, (startSample + actualSamples) / SAMPLE_RATE);
-      segmentScores.push({ start, end, presence: score, active });
-
-      if (active) {
-        const previous = activeIntervals[activeIntervals.length - 1];
-        if (previous && start <= previous.end + 0.02) previous.end = end;
-        else activeIntervals.push({ start, end });
-
-        for (const frame of peakFrames(attacks, ATTACK_THRESHOLD, minAttackFrames)) {
-          const eventTime = start + (frame * hopSeconds);
-          if (eventTime <= duration) attackTimes.push(eventTime);
-        }
-      }
+      segmentScores.push({
+        index: windowIndex,
+        start,
+        end,
+        presence: score,
+        active: score >= PRESENCE_SEGMENT_THRESHOLD,
+      });
+      windowIndex += 1;
     }
 
-    const activeSeconds = activeIntervals.reduce((sum, interval) => sum + Math.max(0, interval.end - interval.start), 0);
+    const presenceProbabilities = new Float32Array(globalFrameCount);
+    const attackProbabilities = new Float32Array(globalFrameCount);
+    let presenceSum = 0;
+    let presenceCount = 0;
+    let activeFrameCount = 0;
+
+    for (let frame = 0; frame < globalFrameCount; frame += 1) {
+      const count = frameCounts[frame];
+      if (!count) continue;
+      const p = presenceSums[frame] / count;
+      const a = attackSums[frame] / count;
+      presenceProbabilities[frame] = p;
+      attackProbabilities[frame] = a;
+      presenceSum += p;
+      presenceCount += 1;
+      if (p >= PRESENCE_FRAME_THRESHOLD) activeFrameCount += 1;
+    }
+
+    const activeIntervals = frameActiveIntervals(
+      presenceProbabilities,
+      PRESENCE_FRAME_THRESHOLD,
+      hopSeconds,
+      duration,
+    );
+
+    const attackTimes = [];
+    for (const frame of peakFrames(attackProbabilities, ATTACK_THRESHOLD, minAttackFrames)) {
+      if (presenceProbabilities[frame] < PRESENCE_FRAME_THRESHOLD) continue;
+      const eventTime = frame * hopSeconds;
+      if (eventTime <= duration) attackTimes.push(eventTime);
+    }
+
+    const activeSegmentCount = segmentScores.filter(item => item.active).length;
     return {
       available: true,
       device: 'browser-wasm',
       model: MODEL_NAME,
+      inferenceMode: 'overlap-frame-presence-v1',
+      windowStrideSeconds: WINDOW_STRIDE_SECONDS,
       presenceFrameThreshold: PRESENCE_FRAME_THRESHOLD,
       presenceSegmentThreshold: PRESENCE_SEGMENT_THRESHOLD,
       attackThreshold: ATTACK_THRESHOLD,
       meanPresence: presenceCount ? presenceSum / presenceCount : 0,
-      activeFraction: activeSeconds / Math.max(duration, 1e-9),
+      activeFraction: activeFrameCount / Math.max(1, presenceCount),
+      activeSegmentFraction: activeSegmentCount / Math.max(1, segmentScores.length),
       activeIntervals,
       segmentScores,
       attackTimes,
@@ -150,11 +212,14 @@ export async function analyzeGuitarEar(audioBuffer) {
       available: false,
       device: 'browser-wasm',
       model: MODEL_NAME,
+      inferenceMode: 'overlap-frame-presence-v1',
+      windowStrideSeconds: WINDOW_STRIDE_SECONDS,
       presenceFrameThreshold: PRESENCE_FRAME_THRESHOLD,
       presenceSegmentThreshold: PRESENCE_SEGMENT_THRESHOLD,
       attackThreshold: ATTACK_THRESHOLD,
       meanPresence: null,
       activeFraction: null,
+      activeSegmentFraction: null,
       activeIntervals: [],
       segmentScores: [],
       attackTimes: [],
@@ -170,6 +235,7 @@ export const guitarEarBrowserConfig = Object.freeze({
   sampleRate: SAMPLE_RATE,
   segmentSeconds: SEGMENT_SECONDS,
   segmentSamples: SEGMENT_SAMPLES,
+  windowStrideSeconds: WINDOW_STRIDE_SECONDS,
   frames: N_FRAMES,
   presenceFrameThreshold: PRESENCE_FRAME_THRESHOLD,
   presenceSegmentThreshold: PRESENCE_SEGMENT_THRESHOLD,

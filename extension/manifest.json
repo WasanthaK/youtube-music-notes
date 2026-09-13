@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "YouTube Music Notes",
-  "version": "0.4.8",
+  "version": "0.4.9",
   "description": "Capture a 30-second YouTube sample, run Guitar Ear Phase-2d and Basic Pitch locally in Chrome, retain the original audio for A/B comparison, and render playable TAB.",
   "permissions": ["activeTab", "tabCapture", "offscreen", "tabs", "scripting"],
   "host_permissions": [

@@ -49,6 +49,7 @@ jobs:
           cp extension/original-audio.js extension-package/
           cp extension/critic.js extension-package/
           cp extension/diagnostic-upload.js extension-package/
+          cp extension/clean-playback.js extension-package/
           cp extension/service_worker.js extension-package/
           cp extension/service-worker-diagnostic.js extension-package/
           cp extension/dist/offscreen.bundle.js extension-package/dist/
@@ -64,6 +65,7 @@ jobs:
           test -f extension-package/original-audio.js
           test -f extension-package/critic.js
           test -f extension-package/diagnostic-upload.js
+          test -f extension-package/clean-playback.js
           test -f extension-package/dist/offscreen.bundle.js
           test -f extension-package/dist/models/guitar-ear-v0.2d-core.onnx
           test -f extension-package/dist/models/guitar-ear-v0.2d-core.onnx.data
@@ -87,14 +89,16 @@ jobs:
           node --check extension-package/original-audio.js
           node --check extension-package/result.js
           node --check extension-package/diagnostic-upload.js
+          node --check extension-package/clean-playback.js
           grep -Fq 'guitar-ear-v0.2d+basic-pitch-ensemble-v2-browser' extension-package/dist/offscreen.bundle.js
           grep -Fq 'browser-wasm' extension-package/dist/offscreen.bundle.js
           grep -Fq 'uploadDiagnosticFromResult' extension-package/service_worker.js
+          grep -Fq 'clean-playback.js' extension-package/result.html
           if grep -Fq '127.0.0.1:8765/transcribe' extension-package/dist/offscreen.bundle.js; then
             echo 'ERROR: packaged offscreen bundle still depends on the localhost Python backend' >&2
             exit 1
           fi
-          echo 'Packaged extension runs Guitar Ear Phase-2d in Chrome with ONNX Runtime Web and primary Supabase diagnostic upload.'
+          echo 'Packaged extension runs Guitar Ear Phase-2d in Chrome and includes clean/lead diagnostic playback.'
 
       - name: Upload ready-to-load extension
         uses: actions/upload-artifact@v4

@@ -1,3 +1,5 @@
+import { uploadDiagnosticFromResult } from './service-worker-diagnostic.js';
+
 const OFFSCREEN_URL = 'offscreen.html';
 let autoStopTimer = null;
 let captureState = 'idle';
@@ -214,10 +216,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message.type === 'ANALYSIS_READY') {
+      const diagnostic = await uploadDiagnosticFromResult(message.result).catch(error => ({
+        supabase_status: null,
+        supabase_ok: false,
+        error: error?.message || String(error),
+      }));
+      message.result.diagnostic = diagnostic;
       const count = message.result?.notes?.length || 0;
-      await setState('done', `Done: ${count} notes detected.`);
+      const uploadNote = diagnostic?.supabase_ok === false ? ' Diagnostic upload will retry from the result page.' : '';
+      await setState('done', `Done: ${count} notes detected.${uploadNote}`);
       await chrome.tabs.create({ url: chrome.runtime.getURL('result.html') });
-      sendResponse({ ok: true });
+      sendResponse({ ok: true, diagnostic });
       return;
     }
 

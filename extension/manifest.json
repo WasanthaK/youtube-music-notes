@@ -1,16 +1,14 @@
 {
   "manifest_version": 3,
   "name": "YouTube Music Notes",
-  "version": "0.4.8",
-  "description": "Capture a 30-second YouTube sample, transcribe guitar through the local Guitar Ear Phase-2d backend, retain the original audio locally for A/B comparison, and render playable TAB.",
+  "version": "0.4.11",
+  "description": "Capture an exact 30-second YouTube benchmark segment, run Guitar Ear Phase-2d and Basic Pitch locally in Chrome, retain the original audio for A/B comparison, and render playable TAB.",
   "permissions": ["activeTab", "tabCapture", "offscreen", "tabs", "scripting"],
   "host_permissions": [
     "https://www.youtube.com/*",
     "https://music.youtube.com/*",
     "https://unpkg.com/*",
-    "https://kgoowanohmtprbwdokjd.supabase.co/*",
-    "http://127.0.0.1/*",
-    "http://localhost/*"
+    "https://kgoowanohmtprbwdokjd.supabase.co/*"
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"

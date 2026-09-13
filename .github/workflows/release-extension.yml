@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'RELEASE_V0_4_7'
+      - 'RELEASE_V0_4_8'
 
 permissions:
   contents: write
@@ -35,7 +35,7 @@ jobs:
         run: |
           set -euo pipefail
           VERSION=$(node -p "require('./extension/manifest.json').version")
-          test "$VERSION" = "0.4.7"
+          test "$VERSION" = "0.4.8"
           mkdir -p extension-package/dist
           cp extension/manifest.json extension-package/
           cp extension/offscreen.html extension-package/
@@ -50,7 +50,7 @@ jobs:
           cp extension/diagnostic-upload.js extension-package/
           cp extension/service_worker.js extension-package/
           cp extension/dist/offscreen.bundle.js extension-package/dist/
-          node -e "const m=JSON.parse(require('fs').readFileSync('extension-package/manifest.json','utf8')); if(m.version!=='0.4.7') process.exit(1); console.log('manifest version',m.version)"
+          node -e "const m=JSON.parse(require('fs').readFileSync('extension-package/manifest.json','utf8')); if(m.version!=='0.4.8') throw new Error('wrong extension version'); if(!m.host_permissions.includes('http://127.0.0.1/*')) throw new Error('missing 127.0.0.1 host permission'); if(!m.host_permissions.includes('http://localhost/*')) throw new Error('missing localhost host permission'); console.log('manifest version and local backend permissions OK')"
           node --check extension-package/original-audio.js
           node --check extension-package/result.js
           node --check extension-package/diagnostic-upload.js
@@ -59,26 +59,26 @@ jobs:
             echo 'ERROR: release bundle still contains legacy browser-only transcription engine' >&2
             exit 1
           fi
-          (cd extension-package && zip -r ../youtube-music-notes-v0.4.7.zip .)
+          (cd extension-package && zip -r ../youtube-music-notes-v0.4.8.zip .)
 
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if gh release view v0.4.7 >/dev/null 2>&1; then
-            gh release upload v0.4.7 youtube-music-notes-v0.4.7.zip --clobber
+          if gh release view v0.4.8 >/dev/null 2>&1; then
+            gh release upload v0.4.8 youtube-music-notes-v0.4.8.zip --clobber
           else
-            gh release create v0.4.7 youtube-music-notes-v0.4.7.zip \
+            gh release create v0.4.8 youtube-music-notes-v0.4.8.zip \
               --target "$GITHUB_SHA" \
-              --title "YouTube Music Notes v0.4.7" \
-              --notes-file RELEASE_NOTES_v0.4.7.md
+              --title "YouTube Music Notes v0.4.8" \
+              --notes-file RELEASE_NOTES_v0.4.8.md
           fi
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: youtube-music-notes-v0.4.7
-          path: youtube-music-notes-v0.4.7.zip
+          name: youtube-music-notes-v0.4.8
+          path: youtube-music-notes-v0.4.8.zip
           if-no-files-found: error
           retention-days: 90

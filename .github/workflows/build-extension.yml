@@ -2,7 +2,7 @@ name: Build Chrome extension
 
 on:
   push:
-    branches: [main]
+    branches: [main, browser-phase2d-onnx]
     paths:
       - 'extension/**'
       - 'web/src/guitarEngine.js'
@@ -36,6 +36,7 @@ jobs:
 
       - name: Prepare extension package
         run: |
+          set -euo pipefail
           mkdir -p extension-package/dist
           cp extension/manifest.json extension-package/
           cp extension/offscreen.html extension-package/
@@ -50,6 +51,8 @@ jobs:
           cp extension/diagnostic-upload.js extension-package/
           cp extension/service_worker.js extension-package/
           cp extension/dist/offscreen.bundle.js extension-package/dist/
+          cp -R extension/dist/models extension-package/dist/models
+          cp -R extension/dist/ort extension-package/dist/ort
 
       - name: Validate extension package
         run: |
@@ -60,20 +63,37 @@ jobs:
           test -f extension-package/critic.js
           test -f extension-package/diagnostic-upload.js
           test -f extension-package/dist/offscreen.bundle.js
-          node -e "const m=JSON.parse(require('fs').readFileSync('extension-package/manifest.json','utf8')); if(!m.host_permissions.includes('http://127.0.0.1/*')) throw new Error('missing 127.0.0.1 host permission'); if(!m.host_permissions.includes('http://localhost/*')) throw new Error('missing localhost host permission'); console.log('manifest.json OK with local backend permissions')"
+          test -f extension-package/dist/models/guitar-ear-v0.2d-core.onnx
+          test -f extension-package/dist/models/guitar-ear-v0.2d-core.onnx.data
+          test -f extension-package/dist/models/guitar-ear-v0.2d-calibration.json
+          test -f extension-package/dist/ort/ort-wasm-simd-threaded.mjs
+          test -f extension-package/dist/ort/ort-wasm-simd-threaded.wasm
+
+          node - <<'NODE'
+          const m = JSON.parse(require('fs').readFileSync('extension-package/manifest.json', 'utf8'));
+          const forbidden = ['http://127.0.0.1/*', 'http://localhost/*'];
+          for (const permission of forbidden) {
+            if ((m.host_permissions || []).includes(permission)) {
+              throw new Error(`localhost permission must not be packaged: ${permission}`);
+            }
+          }
+          console.log('manifest.json OK: no localhost backend permissions');
+          NODE
+
           node --check extension-package/original-audio.js
           node --check extension-package/result.js
           node --check extension-package/diagnostic-upload.js
-          grep -Fq '127.0.0.1:8765/transcribe' extension-package/dist/offscreen.bundle.js
-          if grep -Fq 'guitar-basic-pitch-ensemble-v1.2' extension-package/dist/offscreen.bundle.js; then
-            echo 'ERROR: packaged offscreen bundle still contains legacy browser-only transcription engine' >&2
+          grep -Fq 'guitar-ear-v0.2d+basic-pitch-ensemble-v2-browser' extension-package/dist/offscreen.bundle.js
+          grep -Fq 'browser-wasm' extension-package/dist/offscreen.bundle.js
+          if grep -Fq '127.0.0.1:8765/transcribe' extension-package/dist/offscreen.bundle.js; then
+            echo 'ERROR: packaged offscreen bundle still depends on the localhost Python backend' >&2
             exit 1
           fi
-          echo 'Packaged offscreen bundle routes to the Phase-2d backend and has local host permission.'
+          echo 'Packaged extension runs Guitar Ear Phase-2d in Chrome with ONNX Runtime Web.'
 
       - name: Upload ready-to-load extension
         uses: actions/upload-artifact@v4
         with:
-          name: youtube-music-notes-chrome-extension
+          name: youtube-music-notes-chrome-extension-browser-phase2d
           path: extension-package/
           if-no-files-found: error

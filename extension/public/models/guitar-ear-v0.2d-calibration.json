@@ -1,0 +1,16 @@
+{
+  "model": "guitar-ear-v0.2d-hardneg.best.pt",
+  "sample_rate": 16000,
+  "segment_seconds": 3.0,
+  "presence_frame_threshold": 0.35,
+  "presence_segment_threshold": 0.375,
+  "presence_clip_threshold": 0.375,
+  "attack_threshold": 0.55,
+  "attack_match_tolerance_ms": 50.0,
+  "attack_min_peak_distance_ms": 50.0,
+  "selection_policy": "thresholds selected on validation only and frozen before held-out test/product use",
+  "presence_validation_f1": 0.9318600368324126,
+  "presence_test_f1": 0.8807692307692308,
+  "attack_validation_f1": 0.8450171821305842,
+  "attack_test_f1": 0.8899873790492218
+}

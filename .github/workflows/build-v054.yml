@@ -1,0 +1,100 @@
+name: Build v0.5.7 musical guitar decoder
+
+on:
+  push:
+    paths:
+      - 'RUN_V054_VALIDATION'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-v057-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: extension/package.json
+      - name: Install
+        working-directory: extension
+        run: npm install
+      - name: Test tempo
+        working-directory: extension
+        run: node scripts/test-tempo-analysis.mjs
+      - name: Test adaptive strokes
+        working-directory: extension
+        run: node scripts/test-rhythm-stroke-merge.mjs
+      - name: Test guitar musical decoder
+        working-directory: extension
+        run: node scripts/test-guitar-musical-decoder.mjs
+      - name: Apply soft presence
+        working-directory: extension
+        run: node scripts/patch-soft-presence-v0412.mjs
+      - name: Apply tempo runtime
+        working-directory: extension
+        run: node scripts/patch-tempo-offscreen-v050.mjs
+      - name: Apply tempo engine
+        working-directory: extension
+        run: node scripts/patch-tempo-engine-link-v050.mjs
+      - name: Apply guitar musical decoder
+        working-directory: extension
+        run: node scripts/patch-musical-decoder-v057.mjs
+      - name: Add musical diagnostics
+        working-directory: extension
+        run: node scripts/patch-musical-diagnostics-v057.mjs
+      - name: Pin Phase-2d
+        working-directory: extension
+        run: node scripts/patch-stable-phase2d-v053.mjs
+      - name: Apply 90-second window
+        working-directory: extension
+        run: node scripts/patch-test-window-v054.mjs
+      - name: Fix capture runtime
+        working-directory: extension
+        run: node scripts/patch-runtime-v057.mjs
+      - name: Apply louder playback
+        working-directory: extension
+        run: node scripts/patch-playback-volume-v055.mjs
+      - name: Apply musical playback
+        working-directory: extension
+        run: node scripts/patch-musical-playback-v056.mjs
+      - name: Apply guitar articulation
+        working-directory: extension
+        run: node scripts/patch-guitar-articulation-v057.mjs
+      - name: Build bundle
+        working-directory: extension
+        run: npm run build
+      - name: Validate
+        working-directory: extension
+        run: node scripts/validate-v054.mjs
+      - name: Package
+        run: |
+          mkdir -p extension-package/dist
+          cp extension/manifest.json extension-package/
+          cp extension/offscreen.html extension-package/
+          cp extension/popup.html extension-package/
+          cp extension/popup.js extension-package/
+          cp extension/popup.css extension-package/
+          cp extension/result.html extension-package/
+          cp extension/result.js extension-package/
+          cp extension/result.css extension-package/
+          cp extension/original-audio.js extension-package/
+          cp extension/critic.js extension-package/
+          cp extension/diagnostic-upload.js extension-package/
+          cp extension/clean-playback.js extension-package/
+          cp extension/service_worker.js extension-package/
+          cp extension/service-worker-diagnostic.js extension-package/
+          cp extension/dist/offscreen.bundle.js extension-package/dist/
+          cp -R extension/dist/models extension-package/dist/models
+          cp -R extension/dist/ort extension-package/dist/ort
+      - uses: actions/upload-artifact@v4
+        with:
+          name: youtube-music-notes-v0.5.7-musical-guitar-decoder
+          path: extension-package/
+          if-no-files-found: error

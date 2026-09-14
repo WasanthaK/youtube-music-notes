@@ -3,7 +3,10 @@ name: Build Chrome extension
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     paths:
+      - 'extension/**'
+      - '.github/workflows/build-extension.yml'
       - 'RUN_EXTENSION_VALIDATION'
 
 concurrency:
@@ -35,29 +38,37 @@ jobs:
         working-directory: extension
         run: node scripts/test-tempo-analysis.mjs
 
-      - name: Test tempo stroke merge
+      - name: Test adaptive rhythm strokes
         working-directory: extension
         run: node scripts/test-rhythm-stroke-merge.mjs
 
-      - name: Apply soft presence patch
+      - name: Test guitar musical decoder
         working-directory: extension
-        run: node scripts/patch-soft-presence-v0412.mjs
+        run: node scripts/test-guitar-musical-decoder.mjs
 
-      - name: Apply tempo runtime patch
+      - name: Apply v0.5.7 build patches
         working-directory: extension
-        run: node scripts/patch-tempo-offscreen-v050.mjs
+        run: |
+          set -euo pipefail
+          node scripts/patch-soft-presence-v0412.mjs
+          node scripts/patch-tempo-offscreen-v050.mjs
+          node scripts/patch-tempo-engine-link-v050.mjs
+          node scripts/patch-musical-decoder-v057.mjs
+          node scripts/patch-musical-diagnostics-v057.mjs
+          node scripts/patch-stable-phase2d-v053.mjs
+          node scripts/patch-test-window-v054.mjs
+          node scripts/patch-runtime-v057.mjs
+          node scripts/patch-playback-volume-v055.mjs
+          node scripts/patch-musical-playback-v056.mjs
+          node scripts/patch-guitar-articulation-v057.mjs
 
-      - name: Apply tempo-grid engine patch
-        working-directory: extension
-        run: node scripts/patch-tempo-engine-link-v050.mjs
-
-      - name: Pin stable Phase-2d model
-        working-directory: extension
-        run: node scripts/patch-stable-phase2d-v053.mjs
-
-      - name: Build extension offscreen bundle
+      - name: Build extension
         working-directory: extension
         run: npm run build
+
+      - name: Validate v0.5.7 package inputs
+        working-directory: extension
+        run: node scripts/validate-v054.mjs
 
       - name: Prepare extension package
         run: |
@@ -81,57 +92,9 @@ jobs:
           cp -R extension/dist/models extension-package/dist/models
           cp -R extension/dist/ort extension-package/dist/ort
 
-      - name: Validate stable v0.5.3 package
-        run: |
-          set -euo pipefail
-          test -f extension-package/manifest.json
-          test -f extension-package/service_worker.js
-          test -f extension-package/dist/offscreen.bundle.js
-          test -f extension-package/dist/models/guitar-ear-v0.2d-core.onnx
-          test -f extension-package/dist/models/guitar-ear-v0.2d-core.onnx.data
-          test -f extension-package/dist/models/guitar-ear-v0.2d-calibration.json
-          test -f extension-package/dist/ort/ort-wasm-simd-threaded.mjs
-          test -f extension-package/dist/ort/ort-wasm-simd-threaded.wasm
-
-          node - <<'NODE'
-          const fs = require('fs');
-          const m = JSON.parse(fs.readFileSync('extension-package/manifest.json', 'utf8'));
-          if (m.version !== '0.5.3') throw new Error(`expected v0.5.3, got ${m.version}`);
-          const forbidden = ['http://127.0.0.1/*', 'http://localhost/*'];
-          for (const permission of forbidden) {
-            if ((m.host_permissions || []).includes(permission)) throw new Error(`localhost permission must not be packaged: ${permission}`);
-          }
-          const popup = fs.readFileSync('extension-package/popup.js', 'utf8');
-          if (!popup.includes('const BENCHMARK_START_SECONDS = 30;')) throw new Error('Benchmark start must remain fixed at 30s');
-          if (!popup.includes('const BENCHMARK_END_SECONDS = 60;')) throw new Error('Benchmark end must remain fixed at 60s');
-          const bundle = fs.readFileSync('extension-package/dist/offscreen.bundle.js', 'utf8');
-          for (const marker of [
-            'presence-soft-fallback-v1','uncertain-presence','spectral-flux-autocorrelation-v1',
-            'tempo-stroke-merge-v2','maxOneStrokePerPulse','browser-tempo-v1',
-            'Learning tempo and beat grid in Chrome','phase2d-stable',
-            'guitar-ear-v0.2d-hardneg.best.pt','browser-wasm','chrome-extension-browser'
-          ]) {
-            if (!bundle.includes(marker)) throw new Error(`missing stable v0.5.3 marker: ${marker}`);
-          }
-          console.log('STABLE_TEMPO_STROKE_PACKAGE_OK v0.5.3');
-          NODE
-
-          node --check extension-package/service_worker.js
-          node --check extension-package/service-worker-diagnostic.js
-          node --check extension-package/original-audio.js
-          node --check extension-package/result.js
-          node --check extension-package/diagnostic-upload.js
-          node --check extension-package/clean-playback.js
-          grep -Fq 'uploadDiagnosticFromResult' extension-package/service_worker.js
-          grep -Fq 'clean-playback.js' extension-package/result.html
-          if grep -Fq '127.0.0.1:8765/transcribe' extension-package/dist/offscreen.bundle.js; then
-            echo 'ERROR: packaged offscreen bundle still depends on localhost Python backend' >&2
-            exit 1
-          fi
-
       - name: Upload extension
         uses: actions/upload-artifact@v4
         with:
-          name: youtube-music-notes-chrome-extension-v0.5.3-tempo-stroke-merge
+          name: youtube-music-notes-v0.5.7-musical-guitar-decoder
           path: extension-package/
           if-no-files-found: error

@@ -26,6 +26,9 @@ const ATTACK_MIN_PEAK_DISTANCE_MS = 50;
 const WINDOW_STRIDE_SECONDS = SEGMENT_SECONDS / 2;
 const WINDOW_STRIDE_SAMPLES = Math.round(SAMPLE_RATE * WINDOW_STRIDE_SECONDS);
 
+// Controls whether the Phase-2e model load is attempted at all. Keep false until
+// dist/models/guitar-ear-v0.2e-rhythm-core.onnx is shipped (checked by validate-v054.mjs).
+export const PHASE2E_ENABLED = false;
 const PHASE2E_MODEL_NAME = 'guitar-ear-v0.2e-rhythm-seed29.best.pt';
 const PHASE2E_MODEL_SHA256 = '3c900167abcf4157f4e9acee1bdf85f9c870c64fd454d14d67297f2523681911';
 const PHASE2E_MODEL_URL = () => chrome.runtime.getURL('dist/models/guitar-ear-v0.2e-rhythm-core.onnx');
@@ -89,18 +92,21 @@ async function createSessionBundle() {
     wasm: ORT_WASM_URL(),
   };
 
+  const createPhase2dSession = () => ort.InferenceSession.create(PHASE2D_MODEL_URL(), {
+    executionProviders: ['wasm'],
+    graphOptimizationLevel: 'all',
+    externalData: [{
+      path: 'guitar-ear-v0.2d-core.onnx.data',
+      data: PHASE2D_MODEL_DATA_URL(),
+    }],
+  });
+
   // v0.5.3 stable product baseline: keep the proven Phase-2d acoustic model.
-  // Phase-2e remains in source for later A/B work, but is intentionally not
-  // selected in this package so stroke-density is the only musical variable.
-  {
-    const session = await ort.InferenceSession.create(PHASE2D_MODEL_URL(), {
-      executionProviders: ['wasm'],
-      graphOptimizationLevel: 'all',
-      externalData: [{
-        path: 'guitar-ear-v0.2d-core.onnx.data',
-        data: PHASE2D_MODEL_DATA_URL(),
-      }],
-    });
+  // PHASE2E_ENABLED controls this: while false, Phase-2e is not attempted so
+  // stroke-density is the only musical variable. Phase-2e remains in source
+  // for later A/B work.
+  if (!PHASE2E_ENABLED) {
+    const session = await createPhase2dSession();
     return {
       session,
       phase: 'phase2d-stable',
@@ -123,14 +129,7 @@ async function createSessionBundle() {
     };
   } catch (phase2eError) {
     console.warn('Phase-2e browser model unavailable; falling back to packaged Phase-2d.', phase2eError);
-    const session = await ort.InferenceSession.create(PHASE2D_MODEL_URL(), {
-      executionProviders: ['wasm'],
-      graphOptimizationLevel: 'all',
-      externalData: [{
-        path: 'guitar-ear-v0.2d-core.onnx.data',
-        data: PHASE2D_MODEL_DATA_URL(),
-      }],
-    });
+    const session = await createPhase2dSession();
     return {
       session,
       phase: 'phase2d-fallback',

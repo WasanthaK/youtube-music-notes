@@ -11,6 +11,15 @@ if (!popup.includes('const BENCHMARK_START_SECONDS = 0;')) throw new Error('capt
 if (!popup.includes('const BENCHMARK_END_SECONDS = 90;')) throw new Error('capture must end at 90s');
 if (!popup.includes("benchmarkMode: 'fixed-90s-v1'")) throw new Error('missing fixed-90s-v1 benchmark mode');
 
+const guitarEarSource = read('src/guitarEarBrowser.js');
+if (guitarEarSource.includes('PHASE2E_ENABLED = true')) {
+  if (!fs.existsSync('dist/models/guitar-ear-v0.2e-rhythm-core.onnx')) {
+    throw new Error('PHASE2E_ENABLED is true in src/guitarEarBrowser.js but dist/models/guitar-ear-v0.2e-rhythm-core.onnx is missing');
+  }
+} else if (!guitarEarSource.includes('PHASE2E_ENABLED = false')) {
+  throw new Error('could not find PHASE2E_ENABLED = true/false in src/guitarEarBrowser.js');
+}
+
 const worker = read('service_worker.js');
 for (const marker of [
   'runtime-refresh-v057', 'resetOffscreenForCapture',

@@ -1,8 +1,6 @@
-import { BasicPitch, addPitchBendsToNoteEvents, noteFramesToTime, outputToNotesPoly } from '@spotify/basic-pitch';
+import { BasicPitch } from '@spotify/basic-pitch';
 import { analyzeGuitarEar } from './guitarEarBrowser.js';
-import { analyzeTempo } from './tempoAnalysis.js';
-import { buildGuitarTranscription } from './guitarEngine.js';
-import { buildGuitarTranscriptionPhase2d } from './guitarEnginePhase2d.js';
+import { perSecond, transcribeAudio } from './pipeline.js';
 
 const BASIC_PITCH_MODEL_URL = () => chrome.runtime.getURL('dist/models/basic-pitch/model.json');
 const SUPABASE_URL = 'https://kgoowanohmtprbwdokjd.supabase.co';
@@ -15,10 +13,6 @@ let chunks = [];
 let mediaStream = null;
 let audioContext = null;
 let captureMeta = null;
-
-const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-const midiName = midi => `${NOTE_NAMES[midi % 12]}${Math.floor(midi / 12) - 1}`;
-const perSecond = (count, duration) => duration > 0 ? count / duration : 0;
 
 async function reportProgress(captureMessage) {
   try {
@@ -96,36 +90,6 @@ async function resampleMono(input, sampleRate) {
   return await offline.startRendering();
 }
 
-function reduceMelody(notes, minMidi, maxMidi) {
-  const filtered = notes
-    .filter(note => note.midi >= minMidi && note.midi <= maxMidi && note.confidence >= 0.18)
-    .sort((a, b) => a.start - b.start || b.midi - a.midi);
-  const out = [];
-  for (const note of filtered) {
-    if (!out.length || note.start - out[out.length - 1].start > 0.09) out.push(note);
-    else if (note.confidence > out[out.length - 1].confidence) out[out.length - 1] = note;
-  }
-  return out;
-}
-
-function buildFluteTranscription(frames, onsets, contours) {
-  const timed = noteFramesToTime(
-    addPitchBendsToNoteEvents(
-      contours,
-      outputToNotesPoly(frames, onsets, 0.25, 0.25, 5)
-    )
-  );
-  const raw = timed.map(note => ({
-    start: note.startTimeSeconds,
-    end: note.startTimeSeconds + note.durationSeconds,
-    midi: note.pitchMidi,
-    confidence: note.amplitude,
-    name: midiName(note.pitchMidi)
-  }));
-  const notes = reduceMelody(raw, 60, 96);
-  return { notes, summary: { rawCount: raw.length, playableNotes: notes.length } };
-}
-
 async function runBasicPitch(audioBuffer) {
   const basicPitch = new BasicPitch(BASIC_PITCH_MODEL_URL());
   const frames = [];
@@ -147,84 +111,24 @@ async function runBasicPitch(audioBuffer) {
 async function analyseBlob(blob) {
   await reportProgress('Decoding captured audio locally…');
   const decoded = await decodeBlob(blob);
-  const instrument = captureMeta.instrument || 'guitar';
 
   const basicPitchAudio = await resampleMono(decoded, 22050);
-  await reportProgress('Learning tempo and beat grid in Chrome…');
-  const tempo = analyzeTempo(basicPitchAudio);
-  let guitarEar = null;
-  if (instrument === 'guitar') {
-    await reportProgress('Guitar Ear Phase-2e is listening with rhythm conditioning in Chrome…');
-    const guitarEarAudio = await resampleMono(decoded, 16000);
-    guitarEar = await analyzeGuitarEar(guitarEarAudio);
-    if (!guitarEar.available) {
-      console.warn('Browser Guitar Ear unavailable; using Basic Pitch fallback.', guitarEar.error);
-      await reportProgress('Guitar Ear unavailable; continuing with browser Basic Pitch fallback…');
-    }
-  }
-
-  await reportProgress('Transcribing locally with Basic Pitch…');
-  const { frames, onsets, contours } = await runBasicPitch(basicPitchAudio);
-  const duration = basicPitchAudio.duration;
-
-  let notes;
-  let summary;
-  let engine;
-
-  if (instrument === 'guitar') {
-    const result = guitarEar?.available
-      ? buildGuitarTranscriptionPhase2d(frames, onsets, contours, guitarEar, tempo)
-      : buildGuitarTranscription(frames, onsets, contours);
-    engine = result.engine;
-    notes = result.notes.map(note => ({ ...note, name: midiName(note.midi) }));
-    summary = {
-      ...result.summary,
-      ...(guitarEar?.available ? {
-        guitarEar: {
-          ...result.summary.guitarEar,
-          inferenceMode: guitarEar.inferenceMode || null,
-          windowStrideSeconds: guitarEar.windowStrideSeconds ?? null,
-          activeSegmentFraction: guitarEar.activeSegmentFraction ?? null,
-          segmentScores: guitarEar.segmentScores || [],
-        },
-      } : { guitarEar: guitarEar || { available: false } }),
-      durationSeconds: duration,
-      mergedPerSecond: perSecond(result.summary.mergedCandidates || 0, duration),
-      teachingPerSecond: perSecond(result.summary.teachingCandidates || 0, duration),
-      playablePerSecond: perSecond(result.summary.playableNotes || notes.length, duration),
-      onsetGroupsPerSecond: perSecond(result.summary.onsetGroups || 0, duration),
-    };
-  } else {
-    const result = buildFluteTranscription(frames, onsets, contours);
-    engine = 'flute-basic-pitch-browser-v1';
-    notes = result.notes;
-    summary = { ...result.summary, durationSeconds: duration };
-  }
-
-  const warnings = ['Automatic transcription is approximate on dense full mixes.'];
-  if (instrument === 'guitar' && guitarEar && !guitarEar.available) {
-    warnings.push(`Guitar Ear browser model unavailable: ${guitarEar.error || 'unknown error'}`);
-  }
-
-  return {
-    title: captureMeta.title || 'Captured audio',
-    instrument,
-    mode: captureMeta.mode || 'transcribe',
-    duration_seconds: duration,
-    notes,
-    warnings,
-    midi_base64: null,
-    engine,
-    summary,
-    benchmark: captureMeta.videoId ? {
-      mode: captureMeta.benchmarkMode || 'fixed-30s-v1',
-      videoId: captureMeta.videoId,
-      videoUrl: captureMeta.videoUrl,
-      startSeconds: captureMeta.startSeconds,
-      endSeconds: captureMeta.endSeconds,
-      requestedDurationSeconds: captureMeta.requestedDurationSeconds
-    } : null
-  };
+  return await transcribeAudio(
+    {
+      samples: basicPitchAudio.getChannelData(0),
+      sampleRate: basicPitchAudio.sampleRate,
+      durationSeconds: basicPitchAudio.duration
+    },
+    {
+      // Basic Pitch is given the original AudioBuffer, exactly as before the extraction;
+      // its channel 0 is input.samples.
+      runBasicPitch: () => runBasicPitch(basicPitchAudio),
+      // Guitar Ear needs a 16 kHz AudioBuffer; it is resampled only when the pipeline asks for it.
+      runGuitarEar: async () => analyzeGuitarEar(await resampleMono(decoded, 16000)),
+      reportProgress
+    },
+    captureMeta
+  );
 }
 
 function compactGuitarEar(summary) {

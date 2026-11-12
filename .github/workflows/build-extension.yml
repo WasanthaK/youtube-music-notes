@@ -49,6 +49,10 @@ jobs:
         working-directory: extension
         run: node scripts/test-guitar-musical-decoder.mjs
 
+      - name: Test pipeline purity
+        working-directory: extension
+        run: node scripts/test-pipeline-purity.mjs
+
       - name: Build extension
         working-directory: extension
         run: npm run build

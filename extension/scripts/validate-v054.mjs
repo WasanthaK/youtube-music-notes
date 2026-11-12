@@ -20,6 +20,15 @@ if (guitarEarSource.includes('PHASE2E_ENABLED = true')) {
   throw new Error('could not find PHASE2E_ENABLED = true/false in src/guitarEarBrowser.js');
 }
 
+const pipelineSource = read('src/pipeline.js');
+for (const forbidden of [
+  'chrome.', 'indexedDB', 'document', 'window', 'navigator', 'AudioContext', 'OfflineAudioContext',
+  'MediaRecorder', 'fetch', 'localStorage', 'node:', 'require(', 'process.'
+]) {
+  const pattern = new RegExp(`\\b${forbidden.replace(/[.(]/g, '\\$&')}${/\w$/.test(forbidden) ? '\\b' : ''}`);
+  if (pattern.test(pipelineSource)) throw new Error(`src/pipeline.js must stay environment-neutral but references: ${forbidden}`);
+}
+
 const worker = read('service_worker.js');
 for (const marker of [
   'runtime-refresh-v057', 'resetOffscreenForCapture',

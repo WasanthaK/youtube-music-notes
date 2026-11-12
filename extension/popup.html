@@ -9,7 +9,7 @@
 <body>
   <main>
     <h1>YouTube Music Notes</h1>
-    <p class="sub">Benchmark the same 30-second section of any YouTube video automatically.</p>
+    <p class="sub">Transcribes the first 90 seconds of the YouTube video in this tab into guitar TAB.</p>
 
     <label>Instrument
       <select id="instrument">
@@ -25,15 +25,14 @@
       </select>
     </label>
 
-    <div class="status"><strong>Benchmark sample:</strong> 0:30 → 1:00 automatically</div>
+    <div class="status"><strong>Section:</strong> 0:00 → 1:30 (the video restarts from the beginning)</div>
 
     <div class="buttons">
-      <button id="start">Run 30-second benchmark</button>
+      <button id="start">Transcribe first 90 seconds</button>
       <button id="stop" class="secondary">Stop</button>
     </div>
 
     <div id="status">Ready.</div>
-    <p class="hint">Each result can be compared by YouTube video ID, 30–60s segment, engine version, and metrics. Later we can add random samples automatically.</p>
   </main>
   <script src="popup.js"></script>
 </body>

@@ -61,6 +61,11 @@ jobs:
         working-directory: extension
         run: node scripts/verify-models.mjs
 
+      - name: Test Node transcription CLI
+        working-directory: extension
+        timeout-minutes: 15
+        run: node scripts/test-node-transcribe.mjs
+
       - name: Validate v0.5.7 package inputs
         working-directory: extension
         run: node scripts/validate-v054.mjs

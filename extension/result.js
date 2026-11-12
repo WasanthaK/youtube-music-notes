@@ -165,10 +165,15 @@ function scheduleGuitarNote(note, when, sourceWindowEndSeconds) {
 
   const frequency = midiToFrequency(note.midi);
   const sourceRemaining = Math.max(0.04, sourceWindowEndSeconds - note.start);
-  const sourceDuration = Math.max(0.05, Math.min(note.end - note.start, sourceRemaining, 2.6));
+  const musicalRole = note.musicalRole || 'unknown';
+  const maxSourceDuration = musicalRole === 'lead' ? 1.10 : musicalRole === 'double-stop' ? 0.52 : 0.38;
+  const sourceDuration = Math.max(0.05, Math.min(note.end - note.start, sourceRemaining, maxSourceDuration));
   const wallDuration = sourceDuration / playbackRate;
-  const releaseTail = Math.min(0.24 / playbackRate, 0.34);
-  const audibleDuration = Math.max(0.16, Math.min(wallDuration + releaseTail, 2.9));
+  const releaseTail = musicalRole === 'lead'
+    ? Math.min(0.12 / playbackRate, 0.18)
+    : Math.min(0.045 / playbackRate, 0.07);
+  const maxAudibleDuration = musicalRole === 'lead' ? 1.20 : musicalRole === 'double-stop' ? 0.58 : 0.44;
+  const audibleDuration = Math.max(0.12, Math.min(wallDuration + releaseTail, maxAudibleDuration));
   const confidence = Math.max(0, Math.min(1, note.confidence ?? 0.5));
   const stringNumber = Number(note.guitar?.string || 3.5);
   const stringBrightness = 0.78 + (6 - stringNumber) * 0.065;
@@ -191,7 +196,7 @@ function scheduleGuitarNote(note, when, sourceWindowEndSeconds) {
   body.gain.setValueAtTime(2.4, when);
 
   const gain = audioContext.createGain();
-  const peak = 0.018 + confidence * 0.026;
+  const peak = 0.032 + confidence * 0.045;
   const sustain = Math.max(0.0035, peak * 0.22);
   const releaseStart = Math.max(when + 0.055, when + Math.min(wallDuration, audibleDuration - 0.08));
   gain.gain.setValueAtTime(0.0001, when);
@@ -221,7 +226,7 @@ function scheduleGuitarNote(note, when, sourceWindowEndSeconds) {
     noiseFilter.frequency.setValueAtTime(Math.max(900, Math.min(5200, frequency * 7)), when);
     noiseFilter.Q.setValueAtTime(0.9, when);
     const noiseGain = audioContext.createGain();
-    const noisePeak = 0.006 + confidence * 0.009;
+    const noisePeak = 0.010 + confidence * 0.014;
     noiseGain.gain.setValueAtTime(noisePeak, when);
     noiseGain.gain.exponentialRampToValueAtTime(0.0001, when + 0.03 / playbackRate);
     noise.connect(noiseFilter);
@@ -310,8 +315,15 @@ async function startPlayback(seconds = null, rate = 1) {
   audioContext = new AudioContext();
   await audioContext.resume();
   masterGain = audioContext.createGain();
-  masterGain.gain.setValueAtTime(result?.instrument === 'guitar' ? 0.92 : 0.82, audioContext.currentTime);
-  masterGain.connect(audioContext.destination);
+  masterGain.gain.setValueAtTime(result?.instrument === 'guitar' ? 1.28 : 1.12, audioContext.currentTime);
+  const playbackCompressor = audioContext.createDynamicsCompressor();
+  playbackCompressor.threshold.setValueAtTime(-16, audioContext.currentTime);
+  playbackCompressor.knee.setValueAtTime(18, audioContext.currentTime);
+  playbackCompressor.ratio.setValueAtTime(4, audioContext.currentTime);
+  playbackCompressor.attack.setValueAtTime(0.003, audioContext.currentTime);
+  playbackCompressor.release.setValueAtTime(0.18, audioContext.currentTime);
+  masterGain.connect(playbackCompressor);
+  playbackCompressor.connect(audioContext.destination);
   guitarWave = result?.instrument === 'guitar' ? buildGuitarWave(audioContext) : null;
   pluckNoiseBuffer = result?.instrument === 'guitar' ? buildPluckNoise(audioContext) : null;
 
@@ -397,8 +409,8 @@ function originalSampleUrl() {
   chart.append(result.instrument === 'guitar' ? renderGuitar(result.notes) : renderFlute(result.notes));
   renderTable(result.notes, result.instrument);
 
-  document.querySelector('#playTen').addEventListener('click', () => startPlayback(10, 1));
-  document.querySelector('#playTenSlow').addEventListener('click', () => startPlayback(10, 0.75));
+  document.querySelector('#playTen').addEventListener('click', () => startPlayback(90, 1));
+  document.querySelector('#playTenSlow').addEventListener('click', () => startPlayback(90, 0.75));
   document.querySelector('#playAll').addEventListener('click', () => startPlayback(null, 1));
   document.querySelector('#stopPlayback').addEventListener('click', () => stopPlayback(false));
 

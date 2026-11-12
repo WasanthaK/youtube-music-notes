@@ -89,6 +89,28 @@ async function createSessionBundle() {
     wasm: ORT_WASM_URL(),
   };
 
+  // v0.5.3 stable product baseline: keep the proven Phase-2d acoustic model.
+  // Phase-2e remains in source for later A/B work, but is intentionally not
+  // selected in this package so stroke-density is the only musical variable.
+  {
+    const session = await ort.InferenceSession.create(PHASE2D_MODEL_URL(), {
+      executionProviders: ['wasm'],
+      graphOptimizationLevel: 'all',
+      externalData: [{
+        path: 'guitar-ear-v0.2d-core.onnx.data',
+        data: PHASE2D_MODEL_DATA_URL(),
+      }],
+    });
+    return {
+      session,
+      phase: 'phase2d-stable',
+      model: PHASE2D_MODEL_NAME,
+      modelSha256: null,
+      graphOptimizationLevel: 'all',
+      fallbackReason: null,
+    };
+  }
+
   try {
     const phase2e = await createPhase2eSession();
     return {

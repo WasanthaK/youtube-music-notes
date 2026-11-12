@@ -46,22 +46,6 @@ jobs:
         working-directory: extension
         run: node scripts/test-guitar-musical-decoder.mjs
 
-      - name: Apply v0.5.7 build patches
-        working-directory: extension
-        run: |
-          set -euo pipefail
-          node scripts/patch-soft-presence-v0412.mjs
-          node scripts/patch-tempo-offscreen-v050.mjs
-          node scripts/patch-tempo-engine-link-v050.mjs
-          node scripts/patch-musical-decoder-v057.mjs
-          node scripts/patch-musical-diagnostics-v057.mjs
-          node scripts/patch-stable-phase2d-v053.mjs
-          node scripts/patch-test-window-v054.mjs
-          node scripts/patch-runtime-v057.mjs
-          node scripts/patch-playback-volume-v055.mjs
-          node scripts/patch-musical-playback-v056.mjs
-          node scripts/patch-guitar-articulation-v057.mjs
-
       - name: Build extension
         working-directory: extension
         run: npm run build

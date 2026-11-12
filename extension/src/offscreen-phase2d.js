@@ -1,5 +1,6 @@
 import { BasicPitch, addPitchBendsToNoteEvents, noteFramesToTime, outputToNotesPoly } from '@spotify/basic-pitch';
 import { analyzeGuitarEar } from './guitarEarBrowser.js';
+import { analyzeTempo } from './tempoAnalysis.js';
 import { buildGuitarTranscription } from './guitarEngine.js';
 import { buildGuitarTranscriptionPhase2d } from './guitarEnginePhase2d.js';
 
@@ -149,9 +150,11 @@ async function analyseBlob(blob) {
   const instrument = captureMeta.instrument || 'guitar';
 
   const basicPitchAudio = await resampleMono(decoded, 22050);
+  await reportProgress('Learning tempo and beat grid in Chrome…');
+  const tempo = analyzeTempo(basicPitchAudio);
   let guitarEar = null;
   if (instrument === 'guitar') {
-    await reportProgress('Guitar Ear Phase-2d is listening in Chrome…');
+    await reportProgress('Guitar Ear Phase-2e is listening with rhythm conditioning in Chrome…');
     const guitarEarAudio = await resampleMono(decoded, 16000);
     guitarEar = await analyzeGuitarEar(guitarEarAudio);
     if (!guitarEar.available) {
@@ -170,7 +173,7 @@ async function analyseBlob(blob) {
 
   if (instrument === 'guitar') {
     const result = guitarEar?.available
-      ? buildGuitarTranscriptionPhase2d(frames, onsets, contours, guitarEar)
+      ? buildGuitarTranscriptionPhase2d(frames, onsets, contours, guitarEar, tempo)
       : buildGuitarTranscription(frames, onsets, contours);
     engine = result.engine;
     notes = result.notes.map(note => ({ ...note, name: midiName(note.midi) }));
@@ -232,6 +235,12 @@ function compactGuitarEar(summary) {
     available: guitarEar.available ?? null,
     device: guitarEar.device ?? null,
     model: guitarEar.model ?? null,
+    phase: guitarEar.phase ?? null,
+    model_sha256: guitarEar.modelSha256 ?? null,
+    graph_optimization_level: guitarEar.graphOptimizationLevel ?? null,
+    rhythm_conditioning: guitarEar.rhythmConditioning ?? null,
+    model_fallback_reason: guitarEar.modelFallbackReason ?? null,
+    error: guitarEar.error ?? null,
     mean_presence: guitarEar.meanPresence ?? null,
     active_fraction: guitarEar.activeFraction ?? null,
     attack_count: guitarEar.attackCount ?? null,
@@ -281,6 +290,9 @@ async function saveDiagnostic(result) {
       audio_uploaded: false,
       local_audio_retained: true,
       guitar_ear: compactGuitarEar(s),
+      tempo: s.tempo || null,
+      rhythm: s.rhythm || null,
+      musical_decoder: s.musicalDecoder || null,
       note_trace: (result.notes || []).map(note => ({
         start: Number(note.start || 0),
         end: Number(note.end || note.start || 0),
@@ -288,6 +300,11 @@ async function saveDiagnostic(result) {
         confidence: Number(note.confidence || 0),
         chord_id: Number.isFinite(Number(note.chordId)) ? Number(note.chordId) : null,
         support: note.guitarEarSupport || null,
+        musical_role: note.musicalRole || null,
+        rhythm_slot: Number.isFinite(Number(note.rhythmSlot)) ? Number(note.rhythmSlot) : null,
+        rhythm_beat: Number.isFinite(Number(note.rhythmBeatIndex)) ? Number(note.rhythmBeatIndex) : null,
+        rhythm_subdivision: Number.isFinite(Number(note.rhythmSubdivision)) ? Number(note.rhythmSubdivision) : null,
+        rhythm_slot_time: Number.isFinite(Number(note.rhythmSlotTime)) ? Number(note.rhythmSlotTime) : null,
         string: note.guitar?.string ?? null,
         fret: note.guitar?.fret ?? null
       }))

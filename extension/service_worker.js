@@ -1,3 +1,4 @@
+// runtime-refresh-v057
 import { uploadDiagnosticFromResult } from './service-worker-diagnostic.js';
 
 const OFFSCREEN_URL = 'offscreen.html';
@@ -34,6 +35,15 @@ async function sendToOffscreen(message, attempts = 30, delayMs = 100) {
     }
   }
   throw new Error(`Offscreen transcription engine did not become ready: ${lastError?.message || lastError || 'unknown error'}`);
+}
+
+async function resetOffscreenForCapture() {
+  const contexts = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
+  if (contexts.some(c => c.documentUrl.endsWith(OFFSCREEN_URL))) {
+    await chrome.offscreen.closeDocument();
+    await sleep(120);
+  }
+  await ensureOffscreen();
 }
 
 async function ensureOffscreen() {
@@ -138,10 +148,10 @@ async function playYouTube(tabId, expectedStartSeconds) {
   return result;
 }
 
-async function waitForYouTubeMediaTime(tabId, endSeconds) {
+async function waitForYouTubeMediaTime(tabId, endSeconds, segmentSeconds) {
   const [{ result }] = await chrome.scripting.executeScript({
     target: { tabId },
-    func: async end => {
+    func: async (end, segmentDuration) => {
       const video = document.querySelector('video');
       if (!video) throw new Error('No YouTube video element found.');
 
@@ -176,13 +186,13 @@ async function waitForYouTubeMediaTime(tabId, endSeconds) {
           settled = true;
           cleanup();
           reject(new Error(`Timed out waiting for YouTube media time ${end.toFixed(2)}s; current ${video.currentTime.toFixed(2)}s.`));
-        }, 60000);
+        }, Math.ceil((segmentDuration + 15) * 1000));
         video.addEventListener('timeupdate', check);
         video.addEventListener('ended', onEnded);
         check();
       });
     },
-    args: [endSeconds]
+    args: [endSeconds, segmentSeconds]
   });
   return result;
 }
@@ -246,7 +256,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         throw new Error(`Could not verify YouTube at ${startSeconds.toFixed(2)}s before capture.`);
       }
 
-      await ensureOffscreen();
+      // Always start captures with a fresh offscreen document so an extension
+      // reload cannot leave an older transcription bundle alive in Chrome.
+      await resetOffscreenForCapture();
       const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
       const segmentSeconds = endSeconds - startSeconds;
       const sessionId = ++captureSessionId;
@@ -278,7 +290,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         actualStartSeconds: captureBenchmark.actualStartSeconds,
       });
 
-      const endWatcher = waitForYouTubeMediaTime(tab.id, endSeconds);
+      const endWatcher = waitForYouTubeMediaTime(tab.id, endSeconds, segmentSeconds);
       const played = await playYouTube(tab.id, startSeconds);
       captureBenchmark.actualPlaybackStartSeconds = Number(played?.currentTime ?? startSeconds);
 

@@ -84,7 +84,7 @@ async function initOriginalAudio() {
     const result = await loadOriginalAudioResult();
     const blob = result?.captured_audio_blob;
     if (!(blob instanceof Blob) || blob.size === 0) {
-      status.textContent = 'This result was created before local audio retention was enabled. Run a new transcription to capture the original 30-second sample.';
+      status.textContent = 'This result was created before local audio retention was enabled. Run a new transcription to capture the original 90-second sample.';
       document.querySelectorAll('[data-original-audio-control]').forEach(el => { el.disabled = true; });
       audio.hidden = true;
       return;
@@ -100,8 +100,8 @@ async function initOriginalAudio() {
     const mime = result.captured_audio_mime_type || blob.type || 'audio/webm';
     meta.textContent = `${result.duration_seconds?.toFixed?.(1) || '30'} sec local capture${size ? ` · ${size}` : ''} · ${mime}. Kept only in this extension's local IndexedDB.`;
 
-    document.querySelector('#playOriginalTen').addEventListener('click', () => playOriginalAudio(1, 10));
-    document.querySelector('#playOriginalTenSlow').addEventListener('click', () => playOriginalAudio(0.75, 10));
+    document.querySelector('#playOriginalTen').addEventListener('click', () => playOriginalAudio(1, 90));
+    document.querySelector('#playOriginalTenSlow').addEventListener('click', () => playOriginalAudio(0.75, 90));
     document.querySelector('#stopOriginalAudio').addEventListener('click', () => stopOriginalAudio(false));
     document.querySelector('#downloadOriginalAudio').addEventListener('click', () => {
       const a = document.createElement('a');
@@ -115,7 +115,7 @@ async function initOriginalAudio() {
       if (originalStopAt != null && audio.currentTime >= originalStopAt) {
         audio.pause();
         originalStopAt = null;
-        status.textContent = 'Original 10-second comparison finished.';
+        status.textContent = 'Original 90-second comparison finished.';
       }
     });
     audio.addEventListener('ended', () => {

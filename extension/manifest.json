@@ -1,9 +1,15 @@
 {
   "manifest_version": 3,
   "name": "YouTube Music Notes",
-  "version": "0.4.11",
-  "description": "Capture an exact 30-second YouTube benchmark segment, run Guitar Ear Phase-2d and Basic Pitch locally in Chrome, retain the original audio for A/B comparison, and render playable TAB.",
-  "permissions": ["activeTab", "tabCapture", "offscreen", "tabs", "scripting"],
+  "version": "0.5.7",
+  "description": "Capture the first 90 seconds of YouTube audio, transcribe with stable Phase-2d plus adaptive tempo-aware stroke merging, and audition the result as detected guitar, clean notes, rhythm guitar, or violin-style legato.",
+  "permissions": [
+    "activeTab",
+    "tabCapture",
+    "offscreen",
+    "tabs",
+    "scripting"
+  ],
   "host_permissions": [
     "https://www.youtube.com/*",
     "https://music.youtube.com/*",

@@ -4,8 +4,8 @@ const statusEl = document.querySelector('#status');
 const instrumentEl = document.querySelector('#instrument');
 const modeEl = document.querySelector('#mode');
 
-const BENCHMARK_START_SECONDS = 30;
-const BENCHMARK_END_SECONDS = 60;
+const BENCHMARK_START_SECONDS = 0;
+const BENCHMARK_END_SECONDS = 90;
 
 function applyState(captureState = 'idle', captureMessage = 'Ready.') {
   statusEl.textContent = captureMessage;
@@ -23,14 +23,14 @@ async function refreshState() {
 }
 
 startBtn.addEventListener('click', async () => {
-  statusEl.textContent = 'Preparing automatic 0:30 → 1:00 benchmark…';
+  statusEl.textContent = 'Preparing automatic 0:00 → 1:30 test capture…';
   const response = await chrome.runtime.sendMessage({
     type: 'START_SEGMENT_CAPTURE',
     instrument: instrumentEl.value,
     mode: modeEl.value,
     startSeconds: BENCHMARK_START_SECONDS,
     endSeconds: BENCHMARK_END_SECONDS,
-    benchmarkMode: 'fixed-30s-v1'
+    benchmarkMode: 'fixed-90s-v1'
   });
   if (!response?.ok) statusEl.textContent = response?.error || 'Could not start benchmark capture.';
   await refreshState();

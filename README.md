@@ -53,7 +53,7 @@ The CI workflow uses Node.js 22.
 **What leaves the machine.**
 
 - **Analyze with AI** runs only when you click it. It sends the detected notes, a summary of the run, the engine name, the video title and the duration to a Supabase Edge Function. The function calls OpenAI. Audio is not sent.
-- **Share anonymous diagnostics** is a checkbox in the popup. It is off by default. When it is on, each run uploads a row to a Supabase table. The row holds the YouTube video ID and URL, the video title, run metrics and note counts, the full list of detected notes (timing, pitch, confidence, string and fret), tempo and rhythm data, the browser user agent, and a compact model summary. Audio is not sent. The row has no account field, but it does identify the video.
+- **Share diagnostics** is a checkbox in the popup. It is off by default. When it is on, each run uploads a row to a Supabase table. The row holds the YouTube video ID and URL, the video title, run metrics and note counts, the full list of detected notes (timing, pitch, confidence, string and fret), tempo and rhythm data, the browser user agent, and a compact model summary. Audio is not sent. The row has no account field, but it does identify the video.
 
 ## Limits
 

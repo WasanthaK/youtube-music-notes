@@ -1,0 +1,31 @@
+{
+  "schema": "youtube-music-notes.model-manifest",
+  "schema_version": "1",
+  "models": [
+    {
+      "id": "guitar-ear-v0.2d",
+      "version": "0.2d",
+      "role": "guitar-ear",
+      "source_checkpoint": "guitar-ear-v0.2d-hardneg.best.pt",
+      "training_repo_commit": null,
+      "files": [
+        {
+          "path": "guitar-ear-v0.2d-core.onnx",
+          "bytes": 102216,
+          "sha256": "26b97271b9188489c628f9d2526f786f31a8fb88b69f72d52a30ecbb1aa5b31b"
+        },
+        {
+          "path": "guitar-ear-v0.2d-core.onnx.data",
+          "bytes": 1413888,
+          "sha256": "c83a2f57cea2307ec43f3a4eab49188744974b6ab221f9b242ba1be56e23138d"
+        },
+        {
+          "path": "guitar-ear-v0.2d-calibration.json",
+          "bytes": 599,
+          "sha256": "46bf6c43134308120bf00bd4baceb4e3c128ded7906684df1e310fc91d2d2de7"
+        }
+      ],
+      "calibration": "guitar-ear-v0.2d-calibration.json"
+    }
+  ]
+}

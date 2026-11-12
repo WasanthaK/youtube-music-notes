@@ -7,7 +7,6 @@ on:
     paths:
       - 'extension/**'
       - '.github/workflows/build-extension.yml'
-      - 'RUN_EXTENSION_VALIDATION'
 
 concurrency:
   group: build-extension-${{ github.ref }}

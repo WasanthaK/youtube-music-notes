@@ -1,10 +1,12 @@
-// Checks that src/pipeline.js and everything it imports can run outside a browser.
+// Checks that src/pipeline.js and src/guitarEarCore.js, and everything they import, can run
+// outside a browser.
 //
-// (i)  Statically resolves the relative import graph of src/pipeline.js and fails if any
+// (i)  Statically resolves the relative import graph of both roots and fails if any
 //      file in it references a browser global or a Node-only module, or imports a bare
 //      package that is not on the allow-list below.
 // (ii) Dynamically imports src/pipeline.js in plain Node and checks that transcribeAudio
-//      is an exported function.
+//      is an exported function, and the same for src/guitarEarCore.js and
+//      analyzeGuitarEarSamples.
 //
 // Run from extension/: node scripts/test-pipeline-purity.mjs
 import fs from 'node:fs';
@@ -12,6 +14,8 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const ENTRY = path.resolve('src/pipeline.js');
+// Guitar Ear inference shared by the browser adapter and the Node CLI (tools/transcribe.mjs).
+const CORE_ENTRY = path.resolve('src/guitarEarCore.js');
 
 const FORBIDDEN = [
   'chrome', 'indexedDB', 'document', 'window', 'navigator', 'AudioContext', 'OfflineAudioContext',
@@ -20,7 +24,7 @@ const FORBIDDEN = [
 
 // Bare packages the pure pipeline may import, and why.
 const ALLOWED_PACKAGES = {
-  'fft.js': 'pure JavaScript FFT used by tempoAnalysis.js (already imported in Node by test-tempo-analysis.mjs)',
+  'fft.js': 'pure JavaScript FFT used by tempoAnalysis.js, guitarEarFrontend.js and guitarEarRhythm.js (already imported in Node by test-tempo-analysis.mjs)',
   '@spotify/basic-pitch': 'only the pure post-processing helpers outputToNotesPoly, addPitchBendsToNoteEvents and noteFramesToTime are used; the BasicPitch model class stays in offscreen-phase2d.js'
 };
 
@@ -70,28 +74,34 @@ function checkIdentifiers(file, code) {
     if (!hits.length) continue;
     // A local variable that shadows a global (e.g. `const window = new Float64Array(...)`
     // for an FFT window) is not a reference to the global. Allow it only when the file
-    // declares the binding and every other use is plain indexing (`name[...]`).
+    // declares the binding and every other use is plain indexing (`name[...]`), returning
+    // it (`return name;`), or a shorthand property / destructuring element inside braces
+    // (`{ name, other }`, as in `const { window, fft } = buildFrontend()`).
     const declared = new RegExp(`\\b(?:const|let|var)\\s+${name}\\b`).test(code);
     const bad = hits.filter(hit => {
       const before = code.slice(Math.max(0, hit.index - 12), hit.index);
       const after = code.slice(hit.index + name.length, hit.index + name.length + 2);
       const isDeclaration = /\b(?:const|let|var)\s+$/.test(before);
       const isIndexing = /^\s*\[/.test(after);
-      return !(declared && (isDeclaration || isIndexing));
+      const isReturn = /\breturn\s+$/.test(before) && /^\s*;/.test(after);
+      const lineBefore = code.slice(code.lastIndexOf('\n', hit.index - 1) + 1, hit.index);
+      const opener = lineBefore.replace(/[^{}()[\]]/g, '').slice(-1);
+      const isShorthand = opener === '{' && /[{,]\s*$/.test(before) && /^\s*[,}]/.test(after);
+      return !(declared && (isDeclaration || isIndexing || isReturn || isShorthand));
     });
     if (bad.length) {
       const line = code.slice(0, bad[0].index).split('\n').length;
       fail(`${rel}:${line} references forbidden identifier "${name}"`);
     } else {
-      console.log(`  note ${rel}: "${name}" appears only as a local variable (declaration + indexing), not the global`);
+      console.log(`  note ${rel}: "${name}" appears only as a local variable (declaration, indexing, return, shorthand), not the global`);
     }
   }
 }
 
-console.log('(i) static import graph of src/pipeline.js');
+console.log('(i) static import graph of src/pipeline.js and src/guitarEarCore.js');
 const visited = new Set();
 const packages = new Map();
-const queue = [ENTRY];
+const queue = [ENTRY, CORE_ENTRY];
 while (queue.length) {
   const file = queue.shift();
   if (visited.has(file)) continue;
@@ -134,6 +144,22 @@ try {
     console.log('  The static check (i) still ran. CI installs dependencies, so (ii) runs there.');
   } else {
     fail(`importing src/pipeline.js failed: ${error?.message || error}`);
+  }
+}
+
+console.log('(ii) dynamic import of src/guitarEarCore.js in plain Node');
+try {
+  const mod = await import(pathToFileURL(CORE_ENTRY).href);
+  if (typeof mod.analyzeGuitarEarSamples !== 'function') fail('src/guitarEarCore.js does not export a function named analyzeGuitarEarSamples');
+  else console.log('  ok analyzeGuitarEarSamples is an exported function');
+} catch (error) {
+  const missing = error?.code === 'ERR_MODULE_NOT_FOUND'
+    ? /Cannot find package '([^']+)'/.exec(error.message)?.[1]
+    : null;
+  if (missing && !fs.existsSync('node_modules')) {
+    console.log(`  SKIPPED: npm package "${missing}" is not installed (no node_modules here; run npm install first).`);
+  } else {
+    fail(`importing src/guitarEarCore.js failed: ${error?.message || error}`);
   }
 }
 

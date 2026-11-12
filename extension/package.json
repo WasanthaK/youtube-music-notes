@@ -12,6 +12,7 @@
     "onnxruntime-web": "1.29.0"
   },
   "devDependencies": {
+    "onnxruntime-node": "1.29.0",
     "vite": "^6.2.0"
   }
 }

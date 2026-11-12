@@ -4,7 +4,7 @@ import { analyzeTempo } from './tempoAnalysis.js';
 import { buildGuitarTranscription } from './guitarEngine.js';
 import { buildGuitarTranscriptionPhase2d } from './guitarEnginePhase2d.js';
 
-const BASIC_PITCH_MODEL_URL = 'https://unpkg.com/@spotify/basic-pitch@1.0.1/model/model.json';
+const BASIC_PITCH_MODEL_URL = () => chrome.runtime.getURL('dist/models/basic-pitch/model.json');
 const SUPABASE_URL = 'https://kgoowanohmtprbwdokjd.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_4dlNhnTkkyQRx8CJTqWXfQ_tfx8bz-o';
 const DB_NAME = 'youtube-music-notes-extension';
@@ -127,7 +127,7 @@ function buildFluteTranscription(frames, onsets, contours) {
 }
 
 async function runBasicPitch(audioBuffer) {
-  const basicPitch = new BasicPitch(BASIC_PITCH_MODEL_URL);
+  const basicPitch = new BasicPitch(BASIC_PITCH_MODEL_URL());
   const frames = [];
   const onsets = [];
   const contours = [];

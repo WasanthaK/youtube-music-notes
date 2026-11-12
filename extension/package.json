@@ -4,7 +4,7 @@
   "version": "0.5.7",
   "type": "module",
   "scripts": {
-    "build": "vite build && node scripts/copy-ort-assets.mjs"
+    "build": "vite build && node scripts/copy-ort-assets.mjs && node scripts/copy-basic-pitch-model.mjs"
   },
   "dependencies": {
     "@spotify/basic-pitch": "1.0.1",

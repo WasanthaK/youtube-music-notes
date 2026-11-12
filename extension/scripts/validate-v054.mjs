@@ -28,6 +28,7 @@ for (const marker of [
 ]) {
   if (!worker.includes(marker)) throw new Error(`missing runtime reliability marker: ${marker}`);
 }
+if (!worker.includes('shareDiagnostics')) throw new Error('service worker must read the shareDiagnostics setting');
 if (worker.includes('}, 60000);')) throw new Error('fixed 60-second media watcher timeout must be removed');
 
 const clean = read('clean-playback.js');

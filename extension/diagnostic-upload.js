@@ -70,6 +70,9 @@ async function uploadLatestDiagnostic() {
     const result = await loadCriticResult();
     if (!result?.benchmark?.videoId) return;
 
+    const { shareDiagnostics } = await chrome.storage.local.get('shareDiagnostics');
+    if (shareDiagnostics !== true) return;
+
     const backendStatus = Number(result.diagnostic?.supabase_status);
     if (Number.isFinite(backendStatus) && backendStatus >= 200 && backendStatus < 300) return;
 

@@ -34,6 +34,10 @@ jobs:
         working-directory: extension
         run: npm install
 
+      - name: Check version consistency
+        working-directory: extension
+        run: node scripts/check-version.mjs
+
       - name: Test tempo analyzer
         working-directory: extension
         run: node scripts/test-tempo-analysis.mjs

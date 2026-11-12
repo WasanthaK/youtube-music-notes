@@ -3,7 +3,8 @@ import { execFileSync } from 'node:child_process';
 
 const read = path => fs.readFileSync(path, 'utf8');
 const manifest = JSON.parse(read('manifest.json'));
-if (manifest.version !== '0.5.7') throw new Error(`expected v0.5.7, got ${manifest.version}`);
+const pkg = JSON.parse(read('package.json'));
+if (manifest.version !== pkg.version) throw new Error(`manifest version ${manifest.version} does not match package.json version ${pkg.version}`);
 
 const popup = read('popup.js');
 if (!popup.includes('const BENCHMARK_START_SECONDS = 0;')) throw new Error('capture must start at 0s');

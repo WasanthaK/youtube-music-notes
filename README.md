@@ -1,96 +1,100 @@
-# YouTube Music Notes — Chrome MVP
+# YouTube Music Notes
 
-A local-first Chrome extension that captures audio from the current browser tab and creates a basic playable note chart for **guitar** or **flute**.
+YouTube Music Notes is a Manifest V3 Chrome extension (version 0.5.7). On a YouTube or YouTube Music tab, it restarts the video, records the first 90 seconds of the tab audio, and transcribes the guitar into six-string TAB with string and fret positions. All analysis runs in Chrome. The audio is not uploaded.
 
-## What this MVP does
+## What it does
 
-- Captures current Chrome tab audio after you click **Start capture**.
-- Keeps the captured audio audible while recording.
-- Sends the captured audio to a local FastAPI service at `127.0.0.1:8765`.
-- Uses Spotify **Basic Pitch** for automatic music transcription.
-- Guitar: displays an MVP six-string TAB and string/fret positions.
-- Flute: reduces the transcription to an approximate monophonic melody and displays it on a lightweight treble staff.
-- Exports raw transcription as MIDI and processed note data as JSON.
-- Optional: if `demucs` is installed, Guitar + Transcribe mode attempts the experimental 6-stem guitar separation before transcription.
+- Records the first 90 seconds of the current tab (0:00 to 1:30). The video restarts from the beginning.
+- For guitar, produces six-string TAB with a string and fret for each note.
+- For flute, produces a simple single-line melody on a staff.
+- Opens a result page with:
+  - the guitar TAB and a note table;
+  - playback of the transcription and of the original captured audio, including 0.75x speed;
+  - MIDI and JSON export;
+  - an **Analyze with AI** button (see Privacy).
 
-## Important limitation
+Two models run in the browser. Spotify Basic Pitch detects pitch, and it is bundled in the extension. Guitar Ear v0.2d is the project's own small ONNX model. It detects guitar presence and string attacks, and it runs with ONNX Runtime Web. Tempo and beat estimation, a musical decoder and a fretboard position solver run after them.
 
-This is an automatic transcription assistant, not a perfect score engraver. Dense mixes, distorted guitars, drums, overlapping instruments, reverb and vocals can all create errors. A production version should add beat/key detection, bar quantization, chord recognition, fingering optimization and manual note editing.
+## Install
 
-## 1. Install ffmpeg
+There is no Chrome Web Store listing. Use one of these two methods.
 
-On Windows, install ffmpeg and make sure `ffmpeg.exe` is available in your PATH.
+### Option 1: Download the build artifact
 
-Example using winget if available:
+1. In the repository's GitHub Actions tab, open a successful run of the **Build Chrome extension** workflow.
+2. Download the artifact named `youtube-music-notes-v0.5.7-musical-guitar-decoder`.
+3. Unzip it. The folder contains `manifest.json`.
+4. Open `chrome://extensions` and turn on **Developer mode**.
+5. Click **Load unpacked** and select the unzipped folder.
 
-```powershell
-winget install Gyan.FFmpeg
-```
+### Option 2: Build locally
 
-Open a new PowerShell and verify:
+The CI workflow uses Node.js 22.
 
-```powershell
-ffmpeg -version
-```
+1. In the `extension/` folder, run `npm install`.
+2. Run `npm run build`.
+3. Open `chrome://extensions` and turn on **Developer mode**.
+4. Click **Load unpacked** and select the `extension` folder.
 
-## 2. Start the local transcription server
+## Use
 
-Open PowerShell in the `backend` folder:
+1. Open a video on YouTube or YouTube Music in Chrome.
+2. Click the extension icon.
+3. Choose the **Instrument**: Guitar or Flute.
+4. Check the **Mode**. The popup offers **Arrange melody for instrument** and **Transcribe recorded part**.
+5. Click **Transcribe first 90 seconds**.
+6. Wait while the section is recorded and analyzed.
+7. A result tab opens.
 
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\start_windows.ps1
-```
+## Privacy
 
-Then check:
+**What runs where.** Capture, transcription, tempo estimation, decoding and fretboard solving all run in Chrome. The captured audio stays in the browser. The model files ship with the extension.
 
-`http://127.0.0.1:8765/health`
+**What leaves the machine.**
 
-You should see JSON with `"ok": true`.
+- **Analyze with AI** runs only when you click it. It sends the detected notes, a summary of the run, the engine name, the video title and the duration to a Supabase Edge Function. The function calls OpenAI. Audio is not sent.
+- **Share diagnostics** is a checkbox in the popup. It is off by default. When it is on, each run uploads a row to a Supabase table. The row holds the YouTube video ID and URL, the video title, run metrics and note counts, the full list of detected notes (timing, pitch, confidence, string and fret), tempo and rhythm data, the browser user agent, and a compact model summary. Audio is not sent. The row has no account field, but it does identify the video.
 
-### Optional guitar source separation
+## Limits
 
-For a better attempt at isolating actual guitar from a full song:
+- Automatic transcription is imperfect. Dense mixes, distorted guitar, heavy reverb and vocals can produce errors.
+- Only the first 90 seconds are transcribed.
+- Timing is not yet quantized into bars.
+- The TAB cannot be edited.
 
-```powershell
-pip install demucs
-```
+## Development
 
-The server will detect the `demucs` executable automatically and use `htdemucs_6s` in Guitar + Transcribe mode. This is optional and can be slow.
+Run these commands from the `extension/` folder. They are the commands in `.github/workflows/build-extension.yml`, in workflow order.
 
-## 3. Load the Chrome extension
+Before the build:
 
-1. Open `chrome://extensions`.
-2. Enable **Developer mode**.
-3. Click **Load unpacked**.
-4. Select the `extension` folder in this project.
+1. `npm install`
+2. `node scripts/check-version.mjs`
+3. `node scripts/test-tempo-analysis.mjs`
+4. `node scripts/test-rhythm-stroke-merge.mjs`
+5. `node scripts/test-guitar-musical-decoder.mjs`
 
-## 4. Use it
+Build:
 
-1. Open YouTube or YouTube Music in Chrome.
-2. Play the song.
-3. Click the extension icon.
-4. Choose **Guitar** or **Flute**.
-5. Choose:
-   - **Arrange melody for instrument** — generate a practical melodic part from the mix.
-   - **Transcribe recorded part** — try to capture what is actually present; guitar can optionally use Demucs stem separation.
-6. Click **Start capture**.
-7. Let 20–60 seconds play.
-8. Click **Stop & analyse**.
-9. A result tab opens with the chart and export buttons.
+6. `npm run build` (runs `vite build`, then `node scripts/copy-ort-assets.mjs`, then `node scripts/copy-basic-pitch-model.mjs`)
 
-## Recommended next version
+After the build:
 
-- Synchronize notes to the YouTube playhead.
-- Detect BPM/time signature and quantize into measures.
-- Detect key and accidentals correctly.
-- Add chord names above guitar staff.
-- Optimize guitar fingering using dynamic programming instead of lowest-fret heuristics.
-- Add standard notation + TAB together for guitar.
-- Add MusicXML/PDF export.
-- Add an editable score so the user can correct AI mistakes.
-- Process the song in streaming 10–20 second windows for near-real-time updates.
-- Add more instruments (piano, bass, saxophone, violin).
+7. `node scripts/verify-models.mjs`
+8. `node scripts/validate-v054.mjs`
+
+The workflow then copies the extension files and `dist/` into a package folder and uploads it as the build artifact.
+
+## Repository layout
+
+- `extension/`: the extension, which is the product.
+- `backend/`: the original Python/FastAPI prototype. The extension no longer uses it.
+- `research/guitar_ear/`: early model experiments. Training now lives in a separate private repository.
+- `web/`: a small site deployed to GitHub Pages.
+- `docs/`: architecture notes and benchmarks.
+- `RELEASE_NOTES_*.md`: release notes for earlier versions.
+
+For the architecture, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Parts of that file describe the earlier server-based design, so read it as background.
 
 ## Copyright / usage
 

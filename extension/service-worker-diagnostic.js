@@ -114,6 +114,11 @@ export async function uploadDiagnosticFromResult(result) {
     return { supabase_status: null, skipped: true, reason: 'no-benchmark-video-id' };
   }
 
+  const { shareDiagnostics } = await chrome.storage.local.get('shareDiagnostics');
+  if (shareDiagnostics !== true) {
+    return { supabase_status: null, skipped: true, reason: 'disabled-by-user' };
+  }
+
   const row = diagnosticRowFromResult(result);
   let lastError = null;
   let lastStatus = null;

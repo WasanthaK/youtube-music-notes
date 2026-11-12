@@ -53,6 +53,10 @@ jobs:
         working-directory: extension
         run: npm run build
 
+      - name: Verify model files
+        working-directory: extension
+        run: node scripts/verify-models.mjs
+
       - name: Validate v0.5.7 package inputs
         working-directory: extension
         run: node scripts/validate-v054.mjs

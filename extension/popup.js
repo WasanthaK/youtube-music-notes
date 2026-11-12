@@ -3,6 +3,7 @@ const stopBtn = document.querySelector('#stop');
 const statusEl = document.querySelector('#status');
 const instrumentEl = document.querySelector('#instrument');
 const modeEl = document.querySelector('#mode');
+const shareDiagnosticsEl = document.querySelector('#shareDiagnostics');
 
 const BENCHMARK_START_SECONDS = 0;
 const BENCHMARK_END_SECONDS = 90;
@@ -45,6 +46,13 @@ stopBtn.addEventListener('click', async () => {
 
 chrome.runtime.onMessage.addListener(message => {
   if (message.type === 'STATE_CHANGED') applyState(message.captureState, message.captureMessage);
+});
+
+chrome.storage.local.get('shareDiagnostics').then(stored => {
+  shareDiagnosticsEl.checked = stored?.shareDiagnostics === true;
+});
+shareDiagnosticsEl.addEventListener('change', () => {
+  chrome.storage.local.set({ shareDiagnostics: shareDiagnosticsEl.checked });
 });
 
 refreshState();

@@ -274,10 +274,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       await setState('recording', `Recording YouTube ${videoId}: ${startSeconds.toFixed(1)}s → ${endSeconds.toFixed(1)}s (${segmentSeconds.toFixed(1)}s)…`);
 
+      const { shareDiagnostics } = await chrome.storage.local.get('shareDiagnostics');
       await sendToOffscreen({
         target: 'offscreen',
         type: 'BEGIN_RECORDING',
         streamId,
+        shareDiagnostics: shareDiagnostics === true,
         instrument: message.instrument,
         mode: message.mode,
         title: tab.title || prepared?.title || 'Captured audio',
@@ -322,10 +324,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
       captureBenchmark = null;
       await setState('recording', 'Recording tab audio… play the section you want.');
+      const { shareDiagnostics } = await chrome.storage.local.get('shareDiagnostics');
       await sendToOffscreen({
         target: 'offscreen',
         type: 'BEGIN_RECORDING',
         streamId,
+        shareDiagnostics: shareDiagnostics === true,
         instrument: message.instrument,
         mode: message.mode,
         title: tab.title || 'Captured audio'

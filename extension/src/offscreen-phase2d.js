@@ -255,6 +255,7 @@ function compactGuitarEar(summary) {
 
 async function saveDiagnostic(result) {
   if (!result.benchmark) return { status: null, error: 'no-benchmark-metadata' };
+  if (captureMeta?.shareDiagnostics !== true) return { status: null, error: 'disabled-by-user' };
 
   const s = result.summary || {};
   const row = {

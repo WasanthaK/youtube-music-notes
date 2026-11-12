@@ -52,6 +52,8 @@ execFileSync(process.execPath, ['--check', 'clean-playback.js'], { stdio: 'inher
 execFileSync(process.execPath, ['--check', 'result.js'], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--check', 'service_worker.js'], { stdio: 'inherit' });
 
+if (!fs.existsSync('dist/models/basic-pitch/model.json')) throw new Error('missing bundled Basic Pitch model: dist/models/basic-pitch/model.json');
+
 const bundle = read('dist/offscreen.bundle.js');
 for (const marker of [
   'tempo-adaptive-stroke-v3', 'adaptiveSecondaryStroke', 'secondaryStrokeCount',

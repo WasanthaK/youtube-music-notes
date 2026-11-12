@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "YouTube Music Notes",
   "version": "0.5.7",
-  "description": "Capture the first 90 seconds of YouTube audio, transcribe with stable Phase-2d plus adaptive tempo-aware stroke merging, and audition the result as detected guitar, clean notes, rhythm guitar, or violin-style legato.",
+  "description": "Capture the first 90 seconds of a YouTube video, transcribe the guitar locally in Chrome, compare against the original audio, and render playable TAB.",
   "permissions": [
     "activeTab",
     "tabCapture",

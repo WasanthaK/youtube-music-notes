@@ -2,10 +2,6 @@ name: Release Chrome extension
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - 'RELEASE_V0_4_8'
-      - '.github/workflows/release-extension.yml'
 
 permissions:
   contents: write

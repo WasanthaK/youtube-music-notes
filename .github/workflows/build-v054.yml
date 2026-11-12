@@ -1,9 +1,7 @@
 name: Build v0.5.7 musical guitar decoder
 
 on:
-  push:
-    paths:
-      - 'RUN_V054_VALIDATION'
+  workflow_dispatch:
 
 permissions:
   contents: read

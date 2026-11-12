@@ -52,6 +52,15 @@ execFileSync(process.execPath, ['--check', 'clean-playback.js'], { stdio: 'inher
 execFileSync(process.execPath, ['--check', 'result.js'], { stdio: 'inherit' });
 execFileSync(process.execPath, ['--check', 'service_worker.js'], { stdio: 'inherit' });
 
+const guitarEarSource = read('src/guitarEarBrowser.js');
+if (guitarEarSource.includes('PHASE2E_ENABLED = true')) {
+  if (!fs.existsSync('dist/models/guitar-ear-v0.2e-rhythm-core.onnx')) {
+    throw new Error('PHASE2E_ENABLED is true in src/guitarEarBrowser.js but dist/models/guitar-ear-v0.2e-rhythm-core.onnx is missing');
+  }
+} else if (!guitarEarSource.includes('PHASE2E_ENABLED = false')) {
+  throw new Error('could not find PHASE2E_ENABLED = true/false in src/guitarEarBrowser.js');
+}
+
 const bundle = read('dist/offscreen.bundle.js');
 for (const marker of [
   'tempo-adaptive-stroke-v3', 'adaptiveSecondaryStroke', 'secondaryStrokeCount',

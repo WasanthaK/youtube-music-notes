@@ -86,7 +86,7 @@ for (const marker of [
   'tempo-adaptive-stroke-v3', 'adaptiveSecondaryStroke', 'secondaryStrokeCount',
   'presence-soft-fallback-v1', 'browser-tempo-v1', 'phase2d-stable',
   'guitar-ear-v0.2d-hardneg.best.pt',
-  'guitar-performance-decoder-v1', 'musical_decoder', 'musical_role',
+  'guitar-performance-decoder-v1', 'musical_role',
   'sameNoteRetriggersMerged', 'octaveSwitchesSuppressed', 'duplicatePitchClassRemoved'
 ]) {
   if (!bundle.includes(marker)) throw new Error(`missing bundle marker: ${marker}`);

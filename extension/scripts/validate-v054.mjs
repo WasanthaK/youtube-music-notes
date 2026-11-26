@@ -37,7 +37,14 @@ for (const marker of [
 ]) {
   if (!worker.includes(marker)) throw new Error(`missing runtime reliability marker: ${marker}`);
 }
-if (!worker.includes('shareDiagnostics')) throw new Error('service worker must read the shareDiagnostics setting');
+// S1-10: the service worker's uploader module (not the worker body) reads shareDiagnostics.
+const diagUploader = read('service-worker-diagnostic.js');
+if (!worker.includes('uploadDiagnosticFromResult') || !diagUploader.includes('shareDiagnostics')) throw new Error('service worker must upload diagnostics via a module that reads the shareDiagnostics setting');
+// 'chrome-extension-browser' used to be asserted in the offscreen bundle; the row builder now lives in the service worker module.
+for (const marker of ['chrome-extension-browser', 'note_trace', 'musical_decoder', 'musical_role', 'run_id', 'source_histogram']) {
+  if (!diagUploader.includes(marker)) throw new Error(`missing diagnostic row marker in service-worker-diagnostic.js: ${marker}`);
+}
+if (read('src/offscreen-phase2d.js').includes('transcription_diagnostics')) throw new Error('offscreen must not upload diagnostics (service worker is the single primary uploader)');
 if (worker.includes('}, 60000);')) throw new Error('fixed 60-second media watcher timeout must be removed');
 
 const clean = read('clean-playback.js');
@@ -78,8 +85,8 @@ const bundle = read('dist/offscreen.bundle.js');
 for (const marker of [
   'tempo-adaptive-stroke-v3', 'adaptiveSecondaryStroke', 'secondaryStrokeCount',
   'presence-soft-fallback-v1', 'browser-tempo-v1', 'phase2d-stable',
-  'guitar-ear-v0.2d-hardneg.best.pt', 'chrome-extension-browser',
-  'guitar-performance-decoder-v1', 'musical_decoder', 'musical_role',
+  'guitar-ear-v0.2d-hardneg.best.pt',
+  'guitar-performance-decoder-v1', 'musicalRole',
   'sameNoteRetriggersMerged', 'octaveSwitchesSuppressed', 'duplicatePitchClassRemoved'
 ]) {
   if (!bundle.includes(marker)) throw new Error(`missing bundle marker: ${marker}`);

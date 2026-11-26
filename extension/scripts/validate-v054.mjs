@@ -41,7 +41,7 @@ for (const marker of [
 const diagUploader = read('service-worker-diagnostic.js');
 if (!worker.includes('uploadDiagnosticFromResult') || !diagUploader.includes('shareDiagnostics')) throw new Error('service worker must upload diagnostics via a module that reads the shareDiagnostics setting');
 // 'chrome-extension-browser' used to be asserted in the offscreen bundle; the row builder now lives in the service worker module.
-for (const marker of ['chrome-extension-browser', 'note_trace', 'musical_decoder', 'run_id', 'source_histogram']) {
+for (const marker of ['chrome-extension-browser', 'note_trace', 'musical_decoder', 'musical_role', 'run_id', 'source_histogram']) {
   if (!diagUploader.includes(marker)) throw new Error(`missing diagnostic row marker in service-worker-diagnostic.js: ${marker}`);
 }
 if (read('src/offscreen-phase2d.js').includes('transcription_diagnostics')) throw new Error('offscreen must not upload diagnostics (service worker is the single primary uploader)');
@@ -86,7 +86,7 @@ for (const marker of [
   'tempo-adaptive-stroke-v3', 'adaptiveSecondaryStroke', 'secondaryStrokeCount',
   'presence-soft-fallback-v1', 'browser-tempo-v1', 'phase2d-stable',
   'guitar-ear-v0.2d-hardneg.best.pt',
-  'guitar-performance-decoder-v1', 'musical_role',
+  'guitar-performance-decoder-v1', 'musicalRole',
   'sameNoteRetriggersMerged', 'octaveSwitchesSuppressed', 'duplicatePitchClassRemoved'
 ]) {
   if (!bundle.includes(marker)) throw new Error(`missing bundle marker: ${marker}`);

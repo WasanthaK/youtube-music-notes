@@ -13,7 +13,8 @@ const GUITAR_EAR_RATE = 16000;
 const BENCHMARK_MODE = 'node-cli-v1';
 
 function usage() {
-  return `Usage: node tools/transcribe.mjs <in.wav> <out.json> [--instrument guitar|flute] [--no-guitar-ear]
+  return `Usage: node tools/transcribe.mjs <in.wav> <out.json> [--instrument guitar|flute] [--no-guitar-ear] [--dump-stages]
+       node tools/transcribe.mjs --notes-in <ref.json> <out.json>
 
 Runs the Chrome extension's transcription pipeline (transcribeAudio in src/pipeline.js) on a
 WAV file and writes the same result object the extension produces, as JSON.
@@ -24,6 +25,15 @@ WAV file and writes the same result object the extension produces, as JSON.
   --instrument NAME     guitar (default) or flute.
   --no-guitar-ear       Do not run the Guitar Ear model; guitar transcription then uses the
                         Basic Pitch fallback, as the extension does when Guitar Ear fails.
+  --dump-stages         Also write <out>.stages.json (<out.json> with .json replaced by .stages.json):
+                        {basic_pitch, guitar_ear_gate, decoder, final}, each an array of
+                        {start, end, midi, string, fret} (string/fret null when not yet assigned).
+                        Stages the chosen path does not have are empty arrays.
+  --notes-in REF.json   Skip all audio work and run only the fretboard assignment (the same solver
+                        as the pipeline) on the notes in REF.json: an array of {start, end, midi}
+                        or {"notes": [...]}. <in.wav> is not used in this mode; give only <out.json>.
+                        The output has the normal result shape with guitar.string/guitar.fret filled
+                        (guitar is null for a note the solver cannot place).
   -h, --help            Show this help.
 
 Engines: Basic Pitch via @spotify/basic-pitch on the TensorFlow.js CPU backend (model from
@@ -47,11 +57,17 @@ class CliError extends Error {}
 
 function parseArgs(argv) {
   const positional = [];
-  const options = { instrument: 'guitar', guitarEar: true, help: false };
+  const options = { instrument: 'guitar', guitarEar: true, dumpStages: false, notesIn: null, help: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '-h' || arg === '--help') options.help = true;
     else if (arg === '--no-guitar-ear') options.guitarEar = false;
+    else if (arg === '--dump-stages') options.dumpStages = true;
+    else if (arg === '--notes-in' || arg.startsWith('--notes-in=')) {
+      const value = arg.includes('=') ? arg.slice(arg.indexOf('=') + 1) : argv[++i];
+      if (!value) throw new UsageError('--notes-in needs a file path');
+      options.notesIn = value;
+    }
     else if (arg === '--instrument' || arg.startsWith('--instrument=')) {
       const value = arg.includes('=') ? arg.slice(arg.indexOf('=') + 1) : argv[++i];
       if (value !== 'guitar' && value !== 'flute') throw new UsageError(`--instrument must be guitar or flute, got ${value === undefined ? 'nothing' : JSON.stringify(value)}`);
@@ -60,6 +76,12 @@ function parseArgs(argv) {
     else positional.push(arg);
   }
   if (options.help) return options;
+  if (options.notesIn) {
+    if (positional.length !== 1) throw new UsageError(`with --notes-in expected only <out.json>, got ${positional.length} argument${positional.length === 1 ? '' : 's'}`);
+    if (options.dumpStages) throw new UsageError('--dump-stages cannot be combined with --notes-in (no pipeline stages run)');
+    [options.output] = positional;
+    return options;
+  }
   if (positional.length !== 2) throw new UsageError(`expected <in.wav> and <out.json>, got ${positional.length} argument${positional.length === 1 ? '' : 's'}`);
   [options.input, options.output] = positional;
   return options;
@@ -71,6 +93,64 @@ const log = message => process.stderr.write(`[transcribe] ${message}\n`);
 function jsonReplacer(key, value) {
   if (ArrayBuffer.isView(value) && !(value instanceof DataView)) return Array.from(value);
   return value;
+}
+
+// Normalise a pipeline note for the stages dump.
+const stageNote = note => ({
+  start: note.start,
+  end: note.end,
+  midi: note.midi,
+  string: Number.isFinite(note.guitar?.string) ? note.guitar.string : null,
+  fret: Number.isFinite(note.guitar?.fret) ? note.guitar.fret : null,
+});
+
+// --notes-in: no audio, only the fretboard solver (assignNotesToGuitar in src/guitarEnginePhase2d.js).
+async function runNotesIn(args, started) {
+  const notesPath = path.resolve(args.notesIn);
+  const outputPath = path.resolve(args.output);
+  if (!fs.existsSync(notesPath)) throw new CliError(`notes file not found: ${notesPath}`);
+  const outputDir = path.dirname(outputPath);
+  if (!fs.existsSync(outputDir)) throw new CliError(`output directory does not exist: ${outputDir}`);
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(notesPath, 'utf8'));
+  } catch (error) {
+    throw new CliError(`cannot read ${path.basename(notesPath)}: ${error.message}`);
+  }
+  const list = Array.isArray(parsed) ? parsed : parsed?.notes;
+  if (!Array.isArray(list)) throw new CliError(`${path.basename(notesPath)} must be an array of notes or {"notes": [...]}`);
+  list.forEach((note, index) => {
+    if (![note?.start, note?.end, note?.midi].every(Number.isFinite)) throw new CliError(`note ${index} in ${path.basename(notesPath)} needs numeric start, end and midi`);
+  });
+
+  let assignNotesToGuitar;
+  try {
+    ({ assignNotesToGuitar } = await import('../src/guitarEnginePhase2d.js'));
+  } catch (error) {
+    const missing = error?.code === 'ERR_MODULE_NOT_FOUND' ? /Cannot find package '([^']+)'/.exec(error.message)?.[1] : null;
+    if (missing) throw new CliError(`npm package "${missing}" is not installed; run npm install in extension/ first`);
+    throw error;
+  }
+  const notes = assignNotesToGuitar(list);
+  const unplaced = notes.filter(note => !note.guitar).length;
+  if (unplaced) log(`WARNING: ${unplaced} note${unplaced === 1 ? '' : 's'} could not be placed on the fretboard (guitar: null)`);
+  const duration = notes.reduce((max, note) => Math.max(max, note.end), 0);
+  const result = {
+    title: path.basename(notesPath),
+    instrument: 'guitar',
+    mode: 'transcribe',
+    duration_seconds: duration,
+    notes,
+    warnings: ['Notes supplied by --notes-in; only the fretboard assignment was run.'],
+    midi_base64: null,
+    engine: 'notes-in-fretboard-solver',
+    summary: { playableNotes: notes.length, unplacedNotes: unplaced, durationSeconds: duration },
+    benchmark: null,
+  };
+  fs.writeFileSync(outputPath, `${JSON.stringify(result, jsonReplacer, 2)}\n`);
+  log(`${notes.length} notes assigned, ${((Date.now() - started) / 1000).toFixed(1)} s elapsed`);
+  log(`wrote ${outputPath}`);
+  return 0;
 }
 
 async function main() {
@@ -93,6 +173,7 @@ async function main() {
   console.info = (...items) => console.error(...items);
 
   const started = Date.now();
+  if (args.notesIn) return runNotesIn(args, started);
   const inputPath = path.resolve(args.input);
   const outputPath = path.resolve(args.output);
   if (!fs.existsSync(inputPath)) throw new CliError(`input file not found: ${inputPath}`);
@@ -166,6 +247,10 @@ async function main() {
     startSeconds: 0,
     endSeconds: wav.durationSeconds,
   };
+  const stages = { basic_pitch: [], guitar_ear_gate: [], decoder: [], final: [] };
+  if (args.dumpStages) {
+    options.onStage = (name, notes) => { stages[name] = notes.map(stageNote); };
+  }
 
   const result = await transcribeAudio(
     { samples: basicPitchSamples, sampleRate: BASIC_PITCH_RATE, durationSeconds },
@@ -174,6 +259,11 @@ async function main() {
   );
 
   fs.writeFileSync(outputPath, `${JSON.stringify(result, jsonReplacer, 2)}\n`);
+  if (args.dumpStages) {
+    const stagesPath = outputPath.replace(/\.json$/i, '') + '.stages.json';
+    fs.writeFileSync(stagesPath, `${JSON.stringify(stages, null, 2)}\n`);
+    log(`wrote ${stagesPath}`);
+  }
   log(`engine ${result.engine}, ${result.notes?.length ?? 0} notes, ${durationSeconds.toFixed(3)} s of audio, ${((Date.now() - started) / 1000).toFixed(1)} s elapsed`);
   log(`wrote ${outputPath}`);
   return 0;

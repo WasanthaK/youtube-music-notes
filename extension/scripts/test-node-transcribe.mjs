@@ -6,7 +6,11 @@
 // (ii)  Resampler: a 1 kHz sine at 44.1 kHz resampled to 16 kHz keeps its frequency within
 //       1 Hz (zero-crossing measurement) and its amplitude; a 10 kHz sine is removed.
 // (iii) CLI: writes the clip to a temporary WAV, runs the CLI as a child process and checks
-//       the result object. Needs node_modules (npm install); skipped when absent.
+//       the result object, then again with --dump-stages and checks the stages file. Needs
+//       node_modules (npm install); skipped when absent.
+// (iv)  CLI --notes-in: runs only the fretboard solver on a 3-note fixture and checks that
+//       string and fret reproduce each MIDI pitch under standard tuning. Needs the
+//       @spotify/basic-pitch package that guitarEnginePhase2d.js imports; skipped when absent.
 //
 // No audio file is committed: the clip is synthesised here (Karplus-Strong plucked strings).
 // Run from extension/: node scripts/test-node-transcribe.mjs
@@ -246,8 +250,69 @@ if (!fs.existsSync('node_modules')) {
         `Guitar Ear ran through onnxruntime-node (available ${guitarEar?.available}${guitarEar?.error ? `, error: ${guitarEar.error}` : ''})`,
       );
     }
+
+    // Second run with --dump-stages: <out>.stages.json with the four measurement points.
+    const stagedOut = path.join(dir, 'staged.json');
+    const stagedRun = spawnSync(
+      process.execPath,
+      ['tools/transcribe.mjs', wavPath, stagedOut, '--instrument', 'guitar', '--dump-stages'],
+      { stdio: ['ignore', 'inherit', 'inherit'], timeout: CLI_TIMEOUT_MS },
+    );
+    check(stagedRun.status === 0, `--dump-stages CLI exit code ${stagedRun.status}${stagedRun.signal ? ` (signal ${stagedRun.signal})` : ''}`);
+    try {
+      const stages = JSON.parse(fs.readFileSync(path.join(dir, 'staged.stages.json'), 'utf8'));
+      const names = ['basic_pitch', 'guitar_ear_gate', 'decoder', 'final'];
+      check(names.every(name => Array.isArray(stages[name])), `stages file has arrays for ${names.join(', ')} (${names.map(name => `${name}:${stages[name]?.length}`).join(' ')})`);
+      check(Array.isArray(stages.final) && stages.final.length > 0, 'stages.final is non-empty');
+      const finalNotes = JSON.parse(fs.readFileSync(stagedOut, 'utf8')).notes;
+      check(stages.final?.length === finalNotes.length, `stages.final matches result notes (${stages.final?.length} vs ${finalNotes.length})`);
+    } catch (error) {
+      check(false, `stages file readable (${error.message})`);
+    }
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+console.log('(iv) CLI --notes-in: fretboard solver only');
+{
+  let solverAvailable = true;
+  try {
+    await import('../src/guitarEnginePhase2d.js');
+  } catch (error) {
+    if (error?.code === 'ERR_MODULE_NOT_FOUND' && !fs.existsSync('node_modules')) {
+      solverAvailable = false;
+      console.log(`  SKIPPED: ${error.message.split('\n')[0]} (no node_modules here; run npm install first).`);
+    } else {
+      throw error;
+    }
+  }
+  if (solverAvailable) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ymn-notes-in-'));
+    try {
+      const refPath = path.join(dir, 'ref.json');
+      const outPath = path.join(dir, 'assigned.json');
+      const refMidis = [52, 57, 64]; // E3, A3, E4
+      fs.writeFileSync(refPath, JSON.stringify(refMidis.map((midi, i) => ({ start: i * 0.5, end: i * 0.5 + 0.4, midi }))));
+      const run = spawnSync(process.execPath, ['tools/transcribe.mjs', '--notes-in', refPath, outPath], { stdio: ['ignore', 'inherit', 'inherit'], timeout: 60000 });
+      check(run.status === 0, `--notes-in CLI exit code ${run.status}${run.signal ? ` (signal ${run.signal})` : ''}`);
+      try {
+        const out = JSON.parse(fs.readFileSync(outPath, 'utf8'));
+        const notes = Array.isArray(out.notes) ? out.notes : [];
+        check(notes.length === refMidis.length, `output has ${notes.length} notes (expected ${refMidis.length})`);
+        const OPEN = { 1: 64, 2: 59, 3: 55, 4: 50, 5: 45, 6: 40 }; // e B G D A E, standard tuning
+        notes.forEach((note, i) => {
+          const { string, fret } = note.guitar || {};
+          const ok = Number.isInteger(string) && Number.isInteger(fret) && OPEN[string] + fret === refMidis[i];
+          check(ok, `note ${i}: midi ${refMidis[i]} -> string ${string}, fret ${fret}${ok ? '' : ' (does not give the same pitch)'}`);
+        });
+      } catch (error) {
+        check(false, `--notes-in output readable (${error.message})`);
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   }
 }
 

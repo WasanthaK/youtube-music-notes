@@ -294,14 +294,39 @@ function compactGuitarEar(guitarEar) {
   };
 }
 
-export function buildGuitarTranscriptionPhase2d(frames, onsets, contours, guitarEar, tempo = null) {
+// Fretboard assignment on its own, for evaluation tooling (tools/transcribe.mjs --notes-in).
+// Takes notes ({ start, end, midi, confidence? }), groups them into onset clusters exactly as the
+// pipeline does and runs the same solver (assignClusterToGuitar) with the same hand-position
+// carry-over. Returns one entry per input note, in input order: the note with `guitar`
+// ({ string, stringName, fret }) filled in, or `guitar: null` when the solver could not place it
+// (out of range, or dropped from a chord that cannot be fingered).
+export function assignNotesToGuitar(inputNotes) {
+  const tagged = inputNotes.map((note, index) => ({
+    ...note,
+    confidence: Number.isFinite(Number(note.confidence)) ? Number(note.confidence) : 1,
+    __index: index,
+  }));
+  const placed = new Array(tagged.length).fill(null);
+  let previousHandPosition = 3;
+  for (const cluster of groupIntoOnsets([...tagged].sort((a, b) => a.start - b.start || a.midi - b.midi))) {
+    const assigned = assignClusterToGuitar(cluster.notes, previousHandPosition);
+    previousHandPosition = assigned.handPosition;
+    for (const note of assigned.notes) placed[note.__index] = note.guitar;
+  }
+  return inputNotes.map((note, index) => ({ ...note, guitar: placed[index] }));
+}
+
+export function buildGuitarTranscriptionPhase2d(frames, onsets, contours, guitarEar, tempo = null, onStage = null) {
   const passResults = PASSES.map(pass => decodePass(frames, onsets, contours, pass));
   const merged = mergePassDetections(passResults);
   const teachingCandidates = merged.filter(isTeachingCandidate);
   const preGateClusters = groupIntoOnsets(teachingCandidates);
+  if (onStage) onStage('basic_pitch', merged);
   const gated = applyGuitarEarGate(preGateClusters, guitarEar);
+  if (onStage) onStage('guitar_ear_gate', gated.clusters.flatMap(cluster => cluster.notes));
   const rhythmic = applyTempoGrid(gated.clusters, tempo);
   const musical = decodeGuitarPerformance(rhythmic.clusters, tempo);
+  if (onStage) onStage('decoder', musical.clusters.flatMap(cluster => cluster.notes));
 
   const playable = [];
   let previousHandPosition = 3;

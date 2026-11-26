@@ -44,7 +44,7 @@ function buildFluteTranscription(frames, onsets, contours) {
     name: midiName(note.pitchMidi)
   }));
   const notes = reduceMelody(raw, 60, 96);
-  return { notes, summary: { rawCount: raw.length, playableNotes: notes.length } };
+  return { raw, notes, summary: { rawCount: raw.length, playableNotes: notes.length } };
 }
 
 const noProgress = async () => {};
@@ -67,22 +67,31 @@ const noProgress = async () => {};
  *        Progress callback. Awaited at the same points as before the extraction.
  * @param {object} options  Capture metadata (the BEGIN_RECORDING message): instrument, title,
  *        mode, videoId, videoUrl, benchmarkMode, startSeconds, endSeconds, requestedDurationSeconds.
+ *        Optional options.onStage(name, notes) hook for evaluation tooling. Called synchronously with a
+ *        deep copy of the notes at 'basic_pitch' (after Basic Pitch post-processing), 'guitar_ear_gate'
+ *        (after the Guitar Ear gate/ensemble), 'decoder' (after the musical decoder) and 'final' (the
+ *        returned notes). Stages a code path does not have are not reported: the flute path reports
+ *        'basic_pitch' and 'final'; the guitar Basic Pitch fallback (Guitar Ear unavailable) reports
+ *        only 'final'. Absent, nothing changes.
  * @returns {Promise<object>} The analysis result object.
  */
 export async function transcribeAudio(input, deps, options) {
   const reportProgress = deps.reportProgress || noProgress;
   const captureMeta = options;
+  const onStage = typeof options?.onStage === 'function'
+    ? (name, stageNotes) => options.onStage(name, structuredClone(Array.from(stageNotes)))
+    : null;
   const instrument = captureMeta.instrument || 'guitar';
 
-  await reportProgress('Learning tempo and beat grid in Chrome…');
+  await reportProgress('Learning tempo and beat grid…');
   const tempo = analyzeTempoSamples(input.samples, input.sampleRate);
   let guitarEar = null;
   if (instrument === 'guitar') {
-    await reportProgress('Guitar Ear Phase-2e is listening with rhythm conditioning in Chrome…');
+    await reportProgress('Guitar Ear Phase-2e is listening with rhythm conditioning…');
     guitarEar = await deps.runGuitarEar(input);
     if (!guitarEar.available) {
       console.warn('Browser Guitar Ear unavailable; using Basic Pitch fallback.', guitarEar.error);
-      await reportProgress('Guitar Ear unavailable; continuing with browser Basic Pitch fallback…');
+      await reportProgress('Guitar Ear unavailable; continuing with Basic Pitch fallback…');
     }
   }
 
@@ -96,7 +105,7 @@ export async function transcribeAudio(input, deps, options) {
 
   if (instrument === 'guitar') {
     const result = guitarEar?.available
-      ? buildGuitarTranscriptionPhase2d(frames, onsets, contours, guitarEar, tempo)
+      ? buildGuitarTranscriptionPhase2d(frames, onsets, contours, guitarEar, tempo, onStage)
       : buildGuitarTranscription(frames, onsets, contours);
     engine = result.engine;
     notes = result.notes.map(note => ({ ...note, name: midiName(note.midi) }));
@@ -122,7 +131,9 @@ export async function transcribeAudio(input, deps, options) {
     engine = 'flute-basic-pitch-browser-v1';
     notes = result.notes;
     summary = { ...result.summary, durationSeconds: duration };
+    if (onStage) onStage('basic_pitch', result.raw);
   }
+  if (onStage) onStage('final', notes);
 
   const warnings = ['Automatic transcription is approximate on dense full mixes.'];
   if (instrument === 'guitar' && guitarEar && !guitarEar.available) {

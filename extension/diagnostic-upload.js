@@ -60,6 +60,7 @@ function diagnosticRowFromResult(result) {
       guitar_ear: compactGuitarEarForDiagnostic(summary),
       backend_supabase_status: result.diagnostic?.supabase_status ?? null,
       extension_fallback_upload: true,
+      run_id: result.run_id || null,
       audio_uploaded: false
     }
   };
@@ -72,9 +73,8 @@ async function uploadLatestDiagnostic() {
 
     const { shareDiagnostics } = await chrome.storage.local.get('shareDiagnostics');
     if (shareDiagnostics !== true) return;
-
-    const backendStatus = Number(result.diagnostic?.supabase_status);
-    if (Number.isFinite(backendStatus) && backendStatus >= 200 && backendStatus < 300) return;
+    // Retry only when the service worker's primary upload explicitly failed.
+    if (result.diagnostic?.supabase_ok !== false) return;
 
     const fingerprint = [
       result.benchmark.videoId,

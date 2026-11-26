@@ -14,64 +14,82 @@ function compactGuitarEar(summary) {
     available: guitarEar.available ?? null,
     device: guitarEar.device ?? null,
     model: guitarEar.model ?? null,
-    presence_frame_threshold: guitarEar.presenceFrameThreshold ?? null,
-    presence_segment_threshold: guitarEar.presenceSegmentThreshold ?? null,
-    attack_threshold: guitarEar.attackThreshold ?? null,
+    phase: guitarEar.phase ?? null,
+    model_sha256: guitarEar.modelSha256 ?? null,
+    graph_optimization_level: guitarEar.graphOptimizationLevel ?? null,
+    rhythm_conditioning: guitarEar.rhythmConditioning ?? null,
+    model_fallback_reason: guitarEar.modelFallbackReason ?? null,
+    error: guitarEar.error ?? null,
     mean_presence: guitarEar.meanPresence ?? null,
     active_fraction: guitarEar.activeFraction ?? null,
     attack_count: guitarEar.attackCount ?? null,
     active_intervals: guitarEar.activeIntervals || [],
-    gate,
+    inference_mode: guitarEar.inferenceMode ?? null,
+    window_stride_seconds: guitarEar.windowStrideSeconds ?? null,
+    active_segment_fraction: guitarEar.activeSegmentFraction ?? null,
+    segment_scores: guitarEar.segmentScores || [],
+    gate
   };
 }
 
 function diagnosticRowFromResult(result) {
-  const benchmark = result.benchmark || {};
-  const summary = result.summary || {};
-  const raw = summary.rawByPass || {};
-  const duration = Number(result.duration_seconds || 0);
-  const playable = Number(summary.playableNotes ?? result.notes?.length ?? 0);
-  const startSeconds = Number.isFinite(Number(benchmark.startSeconds)) ? Number(benchmark.startSeconds) : null;
-  const endSeconds = Number.isFinite(Number(benchmark.endSeconds)) ? Number(benchmark.endSeconds) : null;
-  const requestedDurationSeconds = Number.isFinite(Number(benchmark.requestedDurationSeconds)) ? Number(benchmark.requestedDurationSeconds) : null;
-
+  const s = result.summary || {};
   return {
     user_id: null,
-    youtube_video_id: benchmark.videoId || null,
-    youtube_url: benchmark.videoUrl || null,
-    reference_label: benchmark.mode || 'fixed-30s-v1',
+    youtube_video_id: result.benchmark.videoId || null,
+    youtube_url: result.benchmark.videoUrl || null,
+    reference_label: result.benchmark.mode || 'fixed-30s-v1',
     engine: result.engine || 'unknown',
-    instrument: result.instrument || 'guitar',
-    track_title: result.title || 'Captured audio',
-    source: 'chrome-extension',
-    duration_seconds: duration,
-    raw_strict: raw.strict ?? null,
-    raw_balanced: raw.balanced ?? null,
-    raw_sensitive: raw.sensitive ?? null,
-    merged_candidates: summary.mergedCandidates ?? null,
-    teaching_candidates: summary.teachingCandidates ?? null,
-    rejected_as_noise: summary.rejectedAsNoise ?? null,
-    sensitive_only: summary.sensitiveOnly ?? null,
-    playable_notes: playable,
-    onset_groups: summary.onsetGroups ?? null,
-    high_confidence: summary.highConfidence ?? null,
-    uncertain: summary.uncertain ?? null,
-    average_confidence: summary.averageConfidence ?? null,
-    playable_notes_per_second: summary.playablePerSecond ?? perSecond(playable, duration),
+    instrument: result.instrument,
+    track_title: result.title,
+    source: 'chrome-extension-browser',
+    duration_seconds: result.duration_seconds,
+    raw_strict: s.rawByPass?.strict ?? null,
+    raw_balanced: s.rawByPass?.balanced ?? null,
+    raw_sensitive: s.rawByPass?.sensitive ?? null,
+    merged_candidates: s.mergedCandidates ?? null,
+    teaching_candidates: s.teachingCandidates ?? null,
+    rejected_as_noise: s.rejectedAsNoise ?? null,
+    sensitive_only: s.sensitiveOnly ?? null,
+    playable_notes: s.playableNotes ?? result.notes?.length ?? null,
+    onset_groups: s.onsetGroups ?? null,
+    high_confidence: s.highConfidence ?? null,
+    uncertain: s.uncertain ?? null,
+    average_confidence: s.averageConfidence ?? null,
+    playable_notes_per_second: s.playablePerSecond ?? perSecond(result.notes?.length || 0, result.duration_seconds),
     source_histogram: {},
     confidence_buckets: {},
     browser_user_agent: navigator.userAgent,
     extra: {
-      benchmark_mode: benchmark.mode || null,
-      start_seconds: startSeconds,
-      end_seconds: endSeconds,
-      requested_duration_seconds: requestedDurationSeconds,
+      benchmark_mode: result.benchmark.mode,
+      start_seconds: result.benchmark.startSeconds,
+      end_seconds: result.benchmark.endSeconds,
+      requested_duration_seconds: result.benchmark.requestedDurationSeconds,
       local_browser_analysis: true,
       audio_uploaded: false,
       local_audio_retained: true,
-      guitar_ear: compactGuitarEar(summary),
       service_worker_primary_upload: true,
-    },
+      run_id: result.run_id || null,
+      guitar_ear: compactGuitarEar(s),
+      tempo: s.tempo || null,
+      rhythm: s.rhythm || null,
+      musical_decoder: s.musicalDecoder || null,
+      note_trace: (result.notes || []).map(note => ({
+        start: Number(note.start || 0),
+        end: Number(note.end || note.start || 0),
+        midi: Number(note.midi),
+        confidence: Number(note.confidence || 0),
+        chord_id: Number.isFinite(Number(note.chordId)) ? Number(note.chordId) : null,
+        support: note.guitarEarSupport || null,
+        musical_role: note.musicalRole || null,
+        rhythm_slot: Number.isFinite(Number(note.rhythmSlot)) ? Number(note.rhythmSlot) : null,
+        rhythm_beat: Number.isFinite(Number(note.rhythmBeatIndex)) ? Number(note.rhythmBeatIndex) : null,
+        rhythm_subdivision: Number.isFinite(Number(note.rhythmSubdivision)) ? Number(note.rhythmSubdivision) : null,
+        rhythm_slot_time: Number.isFinite(Number(note.rhythmSlotTime)) ? Number(note.rhythmSlotTime) : null,
+        string: note.guitar?.string ?? null,
+        fret: note.guitar?.fret ?? null
+      }))
+    }
   };
 }
 
@@ -116,9 +134,12 @@ export async function uploadDiagnosticFromResult(result) {
 
   const { shareDiagnostics } = await chrome.storage.local.get('shareDiagnostics');
   if (shareDiagnostics !== true) {
-    return { supabase_status: null, skipped: true, reason: 'disabled-by-user' };
+    const status = { supabase_status: null, supabase_ok: null, skipped: true, reason: 'disabled-by-user' };
+    await persistDiagnosticStatus(status).catch(() => {});
+    return status;
   }
 
+  if (!result.run_id) result.run_id = crypto.randomUUID();
   const row = diagnosticRowFromResult(result);
   let lastError = null;
   let lastStatus = null;

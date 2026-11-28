@@ -1,5 +1,6 @@
 // runtime-refresh-v057
 import { uploadDiagnosticFromResult } from './service-worker-diagnostic.js';
+import { analysisProgress, canResetState, planCurrentCapture, settleCurrentCapture } from './popup-progress.js';
 
 const OFFSCREEN_URL = 'offscreen.html';
 let autoStopTimer = null;
@@ -7,14 +8,39 @@ let captureState = 'idle';
 let captureMessage = 'Ready.';
 let captureBenchmark = null;
 let captureSessionId = 0;
+// UX-06 (docs/UX_SPEC.md §5.3): extra fields the popup uses for its progress bar.
+let captureProgress = null;
+let captureStage = null;
+let captureStartedAt = null;
+let captureSegmentSeconds = null;
+let captureNoteCount = null;
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function statePayload() {
-  return { captureState, captureMessage };
+  return {
+    captureState,
+    captureMessage,
+    progress: captureProgress,
+    stage: captureStage,
+    captureStartedAt,
+    segmentSeconds: captureSegmentSeconds,
+    noteCount: captureNoteCount,
+  };
 }
 
 async function setState(state, message) {
+  if (state === 'analysing') {
+    // Entering analysis starts from scratch; later messages keep the last value when unknown.
+    const previous = captureState === 'analysing' ? { progress: captureProgress, stage: captureStage } : null;
+    const mapped = analysisProgress(message, previous);
+    captureProgress = mapped.progress;
+    captureStage = mapped.stage;
+  } else {
+    captureProgress = null;
+    captureStage = null;
+  }
+  if (state !== 'done') captureNoteCount = null;
   captureState = state;
   captureMessage = message;
   try {
@@ -71,6 +97,60 @@ function youtubeVideoId(url = '') {
     if (parsed.hostname.endsWith('youtube.com')) return parsed.searchParams.get('v');
   } catch {}
   return null;
+}
+
+// Reads the tab's <video> without changing it. { ok: false } when the tab is not a YouTube video.
+async function readVideoPosition(tab, { pause = false } = {}) {
+  const videoId = youtubeVideoId(tab?.url || '');
+  if (!tab?.id || !videoId) return { ok: false };
+  try {
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: shouldPause => {
+        const video = document.querySelector('video');
+        if (!video) return null;
+        const wasPlaying = !video.paused;
+        if (shouldPause) video.pause();
+        return { currentTime: video.currentTime, duration: video.duration, paused: video.paused, wasPlaying };
+      },
+      args: [pause]
+    });
+    if (!result || !Number.isFinite(result.currentTime)) return { ok: false, videoId };
+    return {
+      ok: true,
+      videoId,
+      currentTime: result.currentTime,
+      duration: Number.isFinite(result.duration) ? result.duration : null,
+      paused: result.paused,
+      wasPlaying: result.wasPlaying === true,
+    };
+  } catch {
+    return { ok: false, videoId };
+  }
+}
+
+async function resumeYouTube(tabId) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => { void document.querySelector('video')?.play()?.catch(() => {}); }
+    });
+  } catch {}
+}
+
+// Focuses an open result.html tab and reloads it, or opens one. Spec §5.3.5.
+async function openResultTab({ reload }) {
+  const resultUrl = chrome.runtime.getURL('result.html');
+  const tabs = await chrome.tabs.query({});
+  const existing = tabs.find(t => typeof t.url === 'string' && t.url.startsWith(resultUrl));
+  if (!existing) {
+    await chrome.tabs.create({ url: resultUrl });
+    return { reused: false };
+  }
+  await chrome.tabs.update(existing.id, { active: true });
+  if (existing.windowId !== undefined) await chrome.windows.update(existing.windowId, { focused: true }).catch(() => {});
+  if (reload) await chrome.tabs.reload(existing.id);
+  return { reused: true };
 }
 
 async function prepareYouTubeSegment(tabId, startSeconds) {
@@ -236,14 +316,61 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
 
+    if (message.type === 'GET_VIDEO_POSITION') {
+      const tab = await activeTab().catch(() => null);
+      const position = await readVideoPosition(tab);
+      sendResponse(position.ok
+        ? { ok: true, videoId: position.videoId, currentTime: position.currentTime, duration: position.duration }
+        : { ok: false });
+      return;
+    }
+
+    if (message.type === 'RESET_STATE') {
+      // "New capture" in the popup: back to Ready, only from a finished or failed capture.
+      if (!canResetState(captureState)) {
+        sendResponse({ ok: false, error: `Cannot reset while ${captureState}.`, ...statePayload() });
+        return;
+      }
+      await setState('idle', 'Ready.');
+      sendResponse({ ok: true, ...statePayload() });
+      return;
+    }
+
+    if (message.type === 'OPEN_RESULT') {
+      const opened = await openResultTab({ reload: false });
+      sendResponse({ ok: true, ...opened });
+      return;
+    }
+
     if (message.type === 'START_SEGMENT_CAPTURE') {
       const tab = await activeTab();
       const videoId = youtubeVideoId(tab.url || '');
       if (!videoId) throw new Error('Open a YouTube video page before starting an exact segment capture.');
 
-      const startSeconds = Number(message.startSeconds);
-      const endSeconds = Number(message.endSeconds);
-      const benchmarkMode = message.benchmarkMode || 'manual-segment';
+      let startSeconds = Number(message.startSeconds);
+      let endSeconds = Number(message.endSeconds);
+      let benchmarkMode = message.benchmarkMode || 'manual-segment';
+      if (message.startSeconds === 'current') {
+        // Capture from where the user is (spec §5.3.3). Validate first without touching the video,
+        // so a range error never leaves it paused.
+        const position = await readVideoPosition(tab);
+        if (!position.ok) throw new Error('No YouTube video element found on this page.');
+        const plan = planCurrentCapture(position.currentTime, position.duration, message.lengthSeconds);
+        if (!plan.ok) throw new Error(plan.error);
+        // Now pause and settle on the real position: no seek when it is within 0.1 s of the
+        // rounded-down start, and the real start is what benchmark.startSeconds records.
+        const paused = await readVideoPosition(tab, { pause: true });
+        const settled = paused.ok
+          ? settleCurrentCapture(paused.currentTime, paused.duration, message.lengthSeconds)
+          : { ok: false, error: 'No YouTube video element found on this page.' };
+        if (!settled.ok) {
+          if (paused.ok && paused.wasPlaying) await resumeYouTube(tab.id);
+          throw new Error(settled.error);
+        }
+        startSeconds = settled.startSeconds;
+        endSeconds = settled.endSeconds;
+        benchmarkMode = 'from-current-v1';
+      }
       if (!Number.isFinite(startSeconds) || !Number.isFinite(endSeconds) || startSeconds < 0 || endSeconds <= startSeconds) {
         throw new Error('Invalid start/end time range.');
       }
@@ -262,6 +389,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
       const segmentSeconds = endSeconds - startSeconds;
       const sessionId = ++captureSessionId;
+      captureStartedAt = null;
+      captureSegmentSeconds = segmentSeconds;
       captureBenchmark = {
         mode: benchmarkMode,
         videoId,
@@ -274,12 +403,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       await setState('recording', `Recording YouTube ${videoId}: ${startSeconds.toFixed(1)}s → ${endSeconds.toFixed(1)}s (${segmentSeconds.toFixed(1)}s)…`);
 
-      const { shareDiagnostics } = await chrome.storage.local.get('shareDiagnostics');
       await sendToOffscreen({
         target: 'offscreen',
         type: 'BEGIN_RECORDING',
         streamId,
-        shareDiagnostics: shareDiagnostics === true,
         instrument: message.instrument,
         mode: message.mode,
         title: tab.title || prepared?.title || 'Captured audio',
@@ -295,6 +422,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const endWatcher = waitForYouTubeMediaTime(tab.id, endSeconds, segmentSeconds);
       const played = await playYouTube(tab.id, startSeconds);
       captureBenchmark.actualPlaybackStartSeconds = Number(played?.currentTime ?? startSeconds);
+      if (sessionId === captureSessionId && captureState === 'recording') {
+        captureStartedAt = Date.now();
+        await setState('recording', captureMessage);
+      }
 
       void endWatcher.then(async observed => {
         if (sessionId !== captureSessionId) return;
@@ -323,13 +454,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       await ensureOffscreen();
       const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id });
       captureBenchmark = null;
+      captureStartedAt = Date.now();
+      captureSegmentSeconds = null;
       await setState('recording', 'Recording tab audio… play the section you want.');
-      const { shareDiagnostics } = await chrome.storage.local.get('shareDiagnostics');
       await sendToOffscreen({
         target: 'offscreen',
         type: 'BEGIN_RECORDING',
         streamId,
-        shareDiagnostics: shareDiagnostics === true,
         instrument: message.instrument,
         mode: message.mode,
         title: tab.title || 'Captured audio'
@@ -361,8 +492,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       message.result.diagnostic = diagnostic;
       const count = message.result?.notes?.length || 0;
       const uploadNote = diagnostic?.supabase_ok === false ? ' Diagnostic upload will retry from the result page.' : '';
+      captureNoteCount = count;
       await setState('done', `Done: ${count} notes detected.${uploadNote}`);
-      await chrome.tabs.create({ url: chrome.runtime.getURL('result.html') });
+      await openResultTab({ reload: true });
       sendResponse({ ok: true, diagnostic });
       return;
     }

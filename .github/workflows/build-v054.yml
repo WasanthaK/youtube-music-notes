@@ -46,6 +46,7 @@ jobs:
           cp extension/popup.html extension-package/
           cp extension/popup.js extension-package/
           cp extension/popup.css extension-package/
+          cp extension/popup-progress.js extension-package/
           cp extension/result.html extension-package/
           cp extension/result.js extension-package/
           cp extension/result.css extension-package/

@@ -78,7 +78,7 @@ Empty and error states (they replace the TAB card body; the header still shows):
 ### 2.1 Time axis and lines
 
 1. x is set by time only. A line covers `[lineStart, lineEnd)`. Within it, `x = gutter + (t − lineStart) / (lineEnd − lineStart) × U`.
-2. `W` = TAB card content width = `min(viewport − 48, 1200) − 40`. `gutter` = 28 px (string labels). Right pad = 12 px. `U = W − 40`.
+2. `W` = TAB card content width = `min(viewport − 48, 1200) − 40`. `gutter` = 44 px (string labels plus clear space, so a fret on a line's first beat never touches its string label). Right pad = 12 px. `U = W − 56`.
 3. **Tempo known (F5): lines are made of bars.**
    - Quarter beats `Q[]` = `beatTimes` if `metricalMode === 'base-pulse'`, or every second entry (`beatTimes[0], [2], [4] …`) if `'double-pulse'` (F3).
    - Bars are 4 beats long (4/4 assumed, F4). Bar 1 starts at `Q[0]`. If `Q[0] > 0.05 s`, the stretch `[0, Q[0])` is a pickup on line 1, with no bar number.
@@ -99,7 +99,7 @@ Empty and error states (they replace the TAB card body; the header still shows):
 | Gap to next line | 22 px |
 | **Line block total** | **148 px** |
 
-- String labels `e B G D A E` (from `guitar.stringName` order in `guitarEnginePhase2d.js` `STRINGS`) sit at the left of every line, 12 px, muted colour, right-aligned to `gutter − 6`.
+- String labels `e B G D A E` (from `guitar.stringName` order in `guitarEnginePhase2d.js` `STRINGS`) sit at the left of every line, 12 px, muted colour, right-aligned at x = `gutter − 14` (30 px). A glyph on the line's first beat therefore starts at least 4 px right of the label (a two-digit fret's left edge is at `gutter − 8`).
 - String lines are 1 px, `--tab-line`.
 - Row of a note: `rowIndex = guitar.string − 1` (string 1 on top). This is the inverse of the current `6 − string` mapping, which drew a low E as the top line.
 

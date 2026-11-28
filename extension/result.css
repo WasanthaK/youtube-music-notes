@@ -1,50 +1,124 @@
-:root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #171717; background: #f3f3f3; }
-body { margin: 0; }
-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 20px 28px; background: #fff; border-bottom: 1px solid #ddd; position: sticky; top: 0; z-index: 2; }
-h1 { margin: 0; font-size: 22px; }
-#meta { margin: 5px 0 0; color: #666; font-size: 13px; }
+/* §6 visual tokens (light; dark below). Theme follows prefers-color-scheme, no manual toggle. */
+:root {
+  --bg: #F5F5F4; --surface: #FFFFFF;
+  --text: #171717; --tab-fret: #171717; --text-muted: #595959; --tab-low: #6B6B6B;
+  --accent: #1D4ED8; --on-accent: #FFFFFF; --bar: #404040; --playhead: #C2410C;
+  --danger: #B91C1C; --success: #15803D; --tab-line: #8C8C8C; --border: #8C8C8C; --focus: var(--accent);
+  /* §6.1 type: size / line height / weight, each with the family so `font:` stays valid */
+  --fs-h1: 650 20px/28px Inter, system-ui, sans-serif; --fs-h2: 650 16px/24px Inter, system-ui, sans-serif; --fs-h3: 650 14px/20px Inter, system-ui, sans-serif;
+  --fs-body: 400 14px/20px Inter, system-ui, sans-serif; --fs-small: 400 13px/18px Inter, system-ui, sans-serif; --fs-caption: 400 12px/16px Inter, system-ui, sans-serif;
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-6: 24px; --sp-8: 32px;
+  --font: Inter, system-ui, sans-serif;
+  color-scheme: light dark;
+  font-family: var(--font); color: var(--text); background: var(--bg);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #121212; --surface: #1E1E1E;
+    --text: #EDEDED; --tab-fret: #EDEDED; --text-muted: #A8A8A8; --tab-low: #A0A0A0;
+    --accent: #8AB4F8; --on-accent: #0B1B33; --bar: #BDBDBD; --playhead: #FB923C;
+    --danger: #F87171; --success: #4ADE80; --tab-line: #757575; --border: #757575;
+  }
+}
+body { margin: 0; background: var(--bg); color: var(--text); }
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.visually-hidden { position: absolute !important; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+
+/* §1 header: not sticky, same 1200 px column as main */
+.pageHeader { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-4); max-width: 1200px; margin: 0 auto; padding: 20px var(--sp-6) 12px; }
+h1 { margin: 0; font: var(--fs-h1); overflow-wrap: anywhere; }
+.meta { margin: var(--sp-1) 0 0; color: var(--text-muted); font: var(--fs-small); }
+.meta a { color: var(--accent); }
+.notice { margin: 0 0 var(--sp-4); padding: 10px var(--sp-3); border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font: var(--fs-small); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .actions, .playbackActions { display: flex; gap: 8px; flex-wrap: wrap; }
-button { border: 1px solid #bbb; border-radius: 8px; background: white; padding: 8px 12px; cursor: pointer; }
-button:hover:not(:disabled) { background: #f7f7f7; }
+button { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); padding: 8px 12px; cursor: pointer; font: var(--fs-body); }
+button:hover:not(:disabled) { background: var(--bg); }
 button:disabled { opacity: .48; cursor: default; }
-button.primary { background: #171717; color: white; border-color: #171717; }
-button.primary:hover:not(:disabled) { background: #303030; }
-main { max-width: 1200px; margin: 20px auto; padding: 0 20px 50px; }
-.card { background: #fff; border: 1px solid #ddd; border-radius: 12px; padding: 18px; margin-bottom: 16px; overflow: hidden; }
-h2 { margin: 0 0 14px; font-size: 16px; }
-#chart { overflow-x: auto; min-height: 220px; }
-svg { min-width: 900px; }
+button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+button.primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.1); }
+main { max-width: 1200px; margin: 0 auto; padding: 0 var(--sp-6) 50px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 16px; overflow: hidden; }
+h2 { margin: 0 0 14px; font: var(--fs-h2); }
 .tableWrap { max-height: 420px; overflow: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th, td { text-align: left; border-bottom: 1px solid #eee; padding: 8px; }
-th { position: sticky; top: 0; background: white; }
-.noteLabel { font-size: 11px; fill: #333; }
+th, td { text-align: left; border-bottom: 1px solid var(--bg); padding: 8px; }
+th { position: sticky; top: 0; background: var(--surface); }
 .playbackCard, .originalAudioCard { overflow: visible; }
 .playbackHeader, .criticHeader { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; }
 .playbackHeader h2, .criticHeader h2 { margin-bottom: 5px; }
-.helper { margin: 0; color: #666; font-size: 13px; max-width: 680px; line-height: 1.45; }
+.helper { margin: 0; color: var(--text-muted); font-size: 13px; max-width: 680px; line-height: 1.45; }
 .capturedAudio { width: 100%; margin-top: 16px; }
-.playbackStatusRow { display: flex; justify-content: space-between; gap: 12px; margin-top: 16px; color: #555; font-size: 12px; flex-wrap: wrap; }
+.playbackStatusRow { display: flex; justify-content: space-between; gap: 12px; margin-top: 16px; color: var(--text-muted); font-size: 12px; flex-wrap: wrap; }
 #playbackClock { font-variant-numeric: tabular-nums; }
-#originalAudioMeta { color: #777; text-align: right; }
-.progressTrack { margin-top: 8px; height: 6px; border-radius: 999px; background: #ececec; overflow: hidden; }
-#playbackProgress { height: 100%; width: 0%; background: #171717; transition: width .08s linear; }
-tr.playing td { background: #f3f3f3; font-weight: 600; }
-.criticStatus { color: #666; font-size: 13px; margin: 16px 0 0; }
+#originalAudioMeta { color: var(--text-muted); text-align: right; }
+.progressTrack { margin-top: 8px; height: 6px; border-radius: 999px; background: var(--bg); overflow: hidden; }
+#playbackProgress { height: 100%; width: 0%; background: var(--text); transition: width .08s linear; }
+tr.playing td { background: var(--bg); font-weight: 600; }
+.criticStatus { color: var(--text-muted); font-size: 13px; margin: 16px 0 0; }
 .criticGrid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 10px; margin-top: 16px; }
-.criticScore, .criticBadgeRow { border: 1px solid #e2e2e2; border-radius: 10px; padding: 12px; display: flex; justify-content: space-between; gap: 10px; align-items: center; font-size: 13px; }
+.criticScore, .criticBadgeRow { border: 1px solid var(--border); border-radius: 10px; padding: 12px; display: flex; justify-content: space-between; gap: 10px; align-items: center; font-size: 13px; }
 .criticScore strong { font-size: 16px; }
-.criticBadge { text-transform: capitalize; border-radius: 999px; padding: 3px 8px; font-size: 12px; background: #ececec; }
+.criticBadge { text-transform: capitalize; border-radius: 999px; padding: 3px 8px; font-size: 12px; background: #ececec; color: #171717; }
 .criticBadge.low, .criticBadge.promising { background: #e9f6ec; }
 .criticBadge.medium, .criticBadge.mixed { background: #fff4d6; }
 .criticBadge.high, .criticBadge.poor { background: #fde8e8; }
 .criticSummary { margin: 16px 0 0; line-height: 1.5; }
 .criticSections { margin-top: 16px; }
-.criticSection { display: grid; grid-template-columns: 90px 72px 1fr; gap: 10px; align-items: start; padding: 9px 0; border-bottom: 1px solid #eee; font-size: 13px; }
-.criticFootnote { margin: 12px 0 0; color: #777; font-size: 11px; }
+.criticSection { display: grid; grid-template-columns: 90px 72px 1fr; gap: 10px; align-items: start; padding: 9px 0; border-bottom: 1px solid var(--bg); font-size: 13px; }
+.criticFootnote { margin: 12px 0 0; color: var(--text-muted); font-size: 11px; }
 @media (max-width: 760px) {
-  header, .playbackHeader, .criticHeader { flex-direction: column; align-items: stretch; }
+  .pageHeader, .playbackHeader, .criticHeader { flex-direction: column; align-items: stretch; }
   .criticGrid { grid-template-columns: 1fr 1fr; }
   .criticSection { grid-template-columns: 72px 64px 1fr; }
   #originalAudioMeta { text-align: left; }
+}
+
+/* ---------------------------------------------------------------------------
+ * TAB / Melody card (UX-03, docs/UX_SPEC.md §2). Nothing under 12 px (§6.1).
+ * ------------------------------------------------------------------------- */
+.tabCard { position: relative; overflow: visible; }
+.tabLegend { margin: 0 0 var(--sp-3); color: var(--text-muted); font: var(--fs-caption); }
+.tabLegendSample { font-variant-numeric: tabular-nums; }
+.tabLegend-normal { color: var(--tab-fret); font-weight: 600; }
+.tabLegend-low { color: var(--tab-low); font-weight: 600; text-decoration: underline dotted 1px; text-underline-offset: 2px; }
+.tabLegend-held { color: var(--tab-fret); }
+.tabMessage { margin: 0; color: var(--text-muted); font: var(--fs-body); }
+.tabLines { border-radius: 8px; }
+.tabLines:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; }
+svg.tabLine { display: block; max-width: 100%; overflow: visible; }
+.tabString { stroke: var(--tab-line); stroke-width: 1; }
+.tabStringLabel { fill: var(--text-muted); font-size: 12px; }
+.tabBar { stroke: var(--bar); stroke-width: 1.5; }
+.tabTick { stroke: var(--tab-line); stroke-width: 1; }
+.tabTopLabel { fill: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.tabHit { fill: transparent; pointer-events: all; }
+.tabKnock { fill: var(--surface); stroke: none; }
+.tabKnockFlute { fill: none; }
+.tabFret { fill: var(--tab-fret); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tabBend { font-size: 12px; font-weight: 600; }
+.tabHead { fill: var(--tab-fret); }
+.tabSharp { fill: var(--tab-fret); font-size: 13px; }
+.tabLedger { stroke: var(--tab-line); stroke-width: 1; }
+.tabSustain { fill: var(--tab-fret); }
+.tabSustain.low { fill: var(--tab-low); }
+.tabStem { stroke: var(--tab-fret); stroke-width: 1.5; }
+.tabStem.low { stroke: var(--tab-low); }
+/* §2.6 low confidence: --tab-low plus a 1 px dotted underline */
+.tabNote.low .tabFret, .tabNote.low .tabSharp { fill: var(--tab-low); }
+.tabNote.low .tabHead { fill: var(--tab-low); }
+.tabUnderline { stroke: var(--tab-low); stroke-width: 1; stroke-dasharray: 1 2; }
+/* §2.8 active notes during playback */
+.tabNote.active .tabFret, .tabNote.active .tabSharp { fill: var(--accent); font-weight: 700; }
+.tabNote.active .tabHead { fill: var(--accent); }
+.tabNote.active .tabKnock { stroke: var(--accent); stroke-width: 1; }
+/* §7.2 roving cursor, drawn only while the TAB has keyboard focus */
+.tabCursor { display: none; fill: none; stroke: var(--focus); stroke-width: 2; pointer-events: none; }
+.tabLines:focus-visible .tabCursor { display: inline; }
+/* §2.8 tooltip */
+.tabTooltip { position: absolute; z-index: 3; max-width: 280px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font: var(--fs-caption); font-variant-numeric: tabular-nums; box-shadow: 0 4px 12px rgba(0, 0, 0, .18); pointer-events: none; }
+.tabTooltip[hidden] { display: none; }
+@media (max-width: 639px) {
+  .pageHeader { padding-left: var(--sp-4); padding-right: var(--sp-4); }
+  main { padding-left: var(--sp-4); padding-right: var(--sp-4); }
 }

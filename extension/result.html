@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -7,10 +7,10 @@
   <link rel="stylesheet" href="result.css" />
 </head>
 <body>
-  <header>
+  <header class="pageHeader">
     <div>
       <h1 id="title">Music Note Chart</h1>
-      <p id="meta"></p>
+      <p id="meta" class="meta"></p>
     </div>
     <div class="actions">
       <button id="downloadMidi">Download MIDI</button>
@@ -18,7 +18,11 @@
     </div>
   </header>
 
+  <div id="liveStatus" class="visually-hidden" role="status" aria-live="polite"></div>
+
   <main>
+    <p id="notice" class="notice" hidden></p>
+
     <section class="card originalAudioCard" id="originalAudioCard">
       <div class="playbackHeader">
         <div>
@@ -72,9 +76,12 @@
       <div id="criticOutput"></div>
     </section>
 
-    <section class="card">
-      <h2 id="chartTitle">Notation</h2>
-      <div id="chart"></div>
+    <section class="card tabCard" id="tabCard" aria-labelledby="tabTitle">
+      <h2 id="tabTitle">TAB</h2>
+      <p id="tabLegend" class="tabLegend" hidden></p>
+      <p id="tabMessage" class="tabMessage">Loading result…</p>
+      <div id="tabLines" class="tabLines" hidden></div>
+      <div id="tabTooltip" class="tabTooltip" role="tooltip" hidden></div>
     </section>
 
     <section class="card">
@@ -87,6 +94,7 @@
       </div>
     </section>
   </main>
+  <script src="tab-layout.js"></script>
   <script src="result.js"></script>
   <script src="original-audio.js"></script>
   <script src="critic.js"></script>

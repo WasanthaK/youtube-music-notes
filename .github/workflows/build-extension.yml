@@ -53,6 +53,10 @@ jobs:
         working-directory: extension
         run: node scripts/test-pipeline-purity.mjs
 
+      - name: Test TAB layout
+        working-directory: extension
+        run: node scripts/test-tab-layout.mjs
+
       - name: Build extension
         working-directory: extension
         run: npm run build
@@ -80,6 +84,7 @@ jobs:
           cp extension/popup.js extension-package/
           cp extension/popup.css extension-package/
           cp extension/result.html extension-package/
+          cp extension/tab-layout.js extension-package/
           cp extension/result.js extension-package/
           cp extension/result.css extension-package/
           cp extension/original-audio.js extension-package/

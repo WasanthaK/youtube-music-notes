@@ -53,6 +53,10 @@ jobs:
         working-directory: extension
         run: node scripts/test-pipeline-purity.mjs
 
+      - name: Test TAB layout
+        working-directory: extension
+        run: node scripts/test-tab-layout.mjs
+
       - name: Build extension
         working-directory: extension
         run: npm run build
@@ -71,26 +75,7 @@ jobs:
         run: node scripts/validate-v054.mjs
 
       - name: Prepare extension package
-        run: |
-          set -euo pipefail
-          mkdir -p extension-package/dist
-          cp extension/manifest.json extension-package/
-          cp extension/offscreen.html extension-package/
-          cp extension/popup.html extension-package/
-          cp extension/popup.js extension-package/
-          cp extension/popup.css extension-package/
-          cp extension/result.html extension-package/
-          cp extension/result.js extension-package/
-          cp extension/result.css extension-package/
-          cp extension/original-audio.js extension-package/
-          cp extension/critic.js extension-package/
-          cp extension/diagnostic-upload.js extension-package/
-          cp extension/clean-playback.js extension-package/
-          cp extension/service_worker.js extension-package/
-          cp extension/service-worker-diagnostic.js extension-package/
-          cp extension/dist/offscreen.bundle.js extension-package/dist/
-          cp -R extension/dist/models extension-package/dist/models
-          cp -R extension/dist/ort extension-package/dist/ort
+        run: bash extension/scripts/package-extension.sh extension-package
 
       - name: Upload extension
         uses: actions/upload-artifact@v4

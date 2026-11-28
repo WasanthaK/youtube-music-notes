@@ -65,55 +65,357 @@ function midiToFrequency(midi) {
   return 440 * Math.pow(2, (midi - 69) / 12);
 }
 
-function renderGuitar(notes) {
-  const width = Math.max(1000, 120 + notes.length * 58);
-  const height = 270;
-  const svg = el('svg', { width, height, viewBox: `0 0 ${width} ${height}` });
-  const top = 55, gap = 28;
-  const labels = ['e', 'B', 'G', 'D', 'A', 'E'];
-  for (let i=0; i<6; i++) {
-    const y = top + i*gap;
-    svg.append(el('line', { x1: 55, y1: y, x2: width-30, y2: y, stroke: '#666', 'stroke-width': 1 }));
-    const t = el('text', { x: 28, y: y+4, class: 'noteLabel' }); t.textContent = labels[i]; svg.append(t);
-  }
-  notes.forEach((n, idx) => {
-    if (!n.guitar) return;
-    const x = 85 + idx*58;
-    const lineIndex = 6 - n.guitar.string;
-    const y = top + lineIndex*gap;
-    svg.append(el('circle', { cx: x, cy: y, r: 12, fill: '#fff', stroke: '#111' }));
-    const f = el('text', { x: x-4, y: y+4, 'font-size': 11, 'font-weight': 700 }); f.textContent = n.guitar.fret; svg.append(f);
-    const label = el('text', { x: x-13, y: 25, class: 'noteLabel' }); label.textContent = n.name; svg.append(label);
-    const tm = el('text', { x: x-13, y: 245, class: 'noteLabel' }); tm.textContent = n.start.toFixed(1)+'s'; svg.append(tm);
+// ---------------------------------------------------------------------------
+// TAB / Melody card (UX-03, docs/UX_SPEC.md §1 and §2). Layout maths live in
+// tab-layout.js (window.TabLayout); this part only turns a layout into DOM.
+// ---------------------------------------------------------------------------
+
+const TAB_RESIZE_DEBOUNCE_MS = 150; // §2.10
+let tabLayout = null;
+let tabRenderedWidth = 0;
+let tabResizeTimer = null;
+let tabEventNodes = []; // event index -> <g class="tabEvent">
+let tabEventList = []; // event index -> layout event
+let tabNoteNodes = []; // [{ node, start, activeEnd }] for §2.8 highlight
+let tabActiveNodes = new Set();
+let tabLastHighlightT = null;
+let tabCursorIndex = -1;
+let tabHoverIndex = -1;
+let tabUiWired = false;
+
+const tabRound = v => Math.round(v * 100) / 100;
+
+function tabSvgText(attrs, text) {
+  const node = el('text', attrs);
+  node.textContent = text;
+  return node;
+}
+
+function tabAnnounce(message) {
+  const live = document.querySelector('#liveStatus');
+  if (!live) return;
+  live.textContent = '';
+  // a fresh text node so repeated identical reads are still announced
+  requestAnimationFrame(() => { live.textContent = message; });
+}
+
+/** §1 header (title + meta line) and notice. */
+function renderResultHeader(header) {
+  document.querySelector('#title').textContent = header.title;
+  document.title = header.title;
+  const meta = document.querySelector('#meta');
+  meta.textContent = '';
+  header.meta.forEach((item, i) => {
+    if (i > 0) meta.append(document.createTextNode(' · '));
+    let node;
+    if (item.kind === 'link') {
+      node = document.createElement('a');
+      node.href = item.href;
+      node.target = '_blank';
+      node.rel = 'noopener noreferrer';
+    } else {
+      node = document.createElement('span');
+    }
+    node.textContent = item.text;
+    if (item.title) node.title = item.title;
+    node.className = `meta-${item.kind}`;
+    meta.append(node);
   });
+  const notice = document.querySelector('#notice');
+  notice.textContent = header.notice || '';
+  notice.title = header.notice || ''; // §1 one line; the full text stays reachable
+  notice.hidden = !header.notice;
+}
+
+/** §1 empty and error states replace the TAB card body. */
+function renderTabMessage(message, title) {
+  if (title) document.querySelector('#tabTitle').textContent = title;
+  const msg = document.querySelector('#tabMessage');
+  msg.textContent = message;
+  msg.hidden = false;
+  document.querySelector('#tabLegend').hidden = true;
+  const lines = document.querySelector('#tabLines');
+  lines.hidden = true;
+  lines.textContent = '';
+  lines.removeAttribute('tabindex');
+  hideTabTooltip();
+}
+
+function measureTabWidth() {
+  const card = document.querySelector('#tabCard');
+  if (!card) return TabLayout.contentWidthForViewport(window.innerWidth);
+  const style = getComputedStyle(card);
+  const inner = card.clientWidth - parseFloat(style.paddingLeft || 0) - parseFloat(style.paddingRight || 0);
+  return inner > 0 ? Math.floor(inner) : TabLayout.contentWidthForViewport(window.innerWidth); // §2.1.2
+}
+
+function renderTabLegend(legend) {
+  const node = document.querySelector('#tabLegend');
+  node.textContent = '';
+  legend.items.forEach((item, i) => {
+    if (i > 0) node.append(document.createTextNode(' · '));
+    if (item.sample) {
+      const sample = document.createElement('span');
+      sample.className = `tabLegendSample tabLegend-${item.kind}`;
+      sample.textContent = item.sample;
+      sample.setAttribute('aria-hidden', 'true');
+      node.append(sample, document.createTextNode(' '));
+    }
+    const text = document.createElement('span');
+    text.textContent = item.text;
+    node.append(text);
+  });
+  node.hidden = false;
+}
+
+function renderTabNote(group, layout, n) {
+  const noteG = el('g', { class: `tabNote${n.low ? ' low' : ''}`, 'data-start': n.start, 'data-end': n.end });
+  if (layout.kind === 'guitar') {
+    const w = n.right - n.left;
+    // §2.4.2 knockout behind the digits (also the §2.8 active box)
+    noteG.append(el('rect', {
+      class: 'tabKnock', x: tabRound(n.left - 2), y: tabRound(n.y - TabLayout.CONSTANTS.KNOCKOUT_HEIGHT / 2),
+      width: tabRound(w + TabLayout.CONSTANTS.KNOCKOUT_PAD_X), height: TabLayout.CONSTANTS.KNOCKOUT_HEIGHT,
+    }));
+    const text = el('text', { class: 'tabFret', x: tabRound(n.left), y: tabRound(n.y + 4.5) });
+    text.append(document.createTextNode(String(n.fret)));
+    if (n.bend) {
+      const b = el('tspan', { class: 'tabBend' }); // §2.4.3
+      b.textContent = 'b';
+      text.append(b);
+    }
+    noteG.append(text);
+    if (n.low) { // §2.6 dotted underline 2 px below the digits
+      noteG.append(el('line', { class: 'tabUnderline', x1: tabRound(n.left), x2: tabRound(n.left + n.digitsWidth), y1: tabRound(n.y + 6.5), y2: tabRound(n.y + 6.5) }));
+    }
+  } else {
+    const C = TabLayout.CONSTANTS;
+    for (const y of n.ledgers || []) { // §2.9 ledger lines
+      noteG.append(el('line', { class: 'tabLedger', x1: tabRound(n.x - C.FLUTE_LEDGER_WIDTH / 2), x2: tabRound(n.x + C.FLUTE_LEDGER_WIDTH / 2), y1: y, y2: y }));
+    }
+    noteG.append(el('rect', { class: 'tabKnock tabKnockFlute', x: tabRound(n.x - 8), y: tabRound(n.y - 6.5), width: 16, height: 13 }));
+    noteG.append(el('ellipse', {
+      class: 'tabHead', cx: tabRound(n.x), cy: tabRound(n.y), rx: C.FLUTE_HEAD_RX, ry: C.FLUTE_HEAD_RY,
+      transform: `rotate(${C.FLUTE_HEAD_ROTATE} ${tabRound(n.x)} ${tabRound(n.y)})`,
+    }));
+    if (n.sharp) noteG.append(tabSvgText({ class: 'tabSharp', x: tabRound(n.x - C.FLUTE_SHARP_OFFSET), y: tabRound(n.y + 4.5), 'text-anchor': 'middle' }, '♯'));
+    if (n.low) noteG.append(el('line', { class: 'tabUnderline', x1: tabRound(n.x - 6), x2: tabRound(n.x + 6), y1: tabRound(n.y + 7), y2: tabRound(n.y + 7) }));
+  }
+  group.append(noteG);
+  tabNoteNodes.push({ node: noteG, start: n.start, activeEnd: n.activeEnd });
+}
+
+function renderTabLine(layout, line) {
+  const g = layout.geometry;
+  const W = layout.width;
+  const svg = el('svg', {
+    class: 'tabLine', width: W, height: tabRound(g.height), viewBox: `0 0 ${W} ${tabRound(g.height)}`,
+    role: 'group', 'aria-label': line.label, // §2.10
+    'data-line': line.index, 'data-start': line.start, 'data-end': line.end,
+  });
+  svg.style.marginBottom = `${g.lineGap}px`;
+  const endX = tabRound(line.endX); // §2.1.5 the last line is not stretched
+
+  for (const s of g.staffLines) { // §2.2 strings / §2.9 staff
+    svg.append(el('line', { class: 'tabString', x1: layout.gutter, x2: endX, y1: s.y, y2: s.y }));
+    if (s.label) svg.append(tabSvgText({ class: 'tabStringLabel', x: g.stringLabelX, y: s.y + 4, 'text-anchor': 'end' }, s.label));
+  }
+  for (const bar of line.bars) { // §2.7 bar lines
+    svg.append(el('line', { class: 'tabBar', x1: tabRound(bar.x), x2: tabRound(bar.x), y1: g.barY1, y2: g.barY2 }));
+  }
+  for (const tick of line.beatTicks) { // §2.7 beat / half-beat / second ticks rising from string 1
+    svg.append(el('line', { class: `tabTick tabTick-${tick.kind}`, x1: tabRound(tick.x), x2: tabRound(tick.x), y1: g.tickBaseY, y2: g.tickBaseY - tick.h }));
+  }
+  for (const label of line.topLabels) {
+    svg.append(tabSvgText({ class: 'tabTopLabel', x: tabRound(label.x), y: g.topLabelY, 'text-anchor': label.anchor }, label.text));
+  }
+
+  // §2.5 sustain bars first, so knockouts and heads sit on top
+  for (const c of line.carrySustains) {
+    svg.append(el('rect', { class: `tabSustain${c.low ? ' low' : ''}`, x: tabRound(c.x1), y: tabRound(c.y - 1), width: tabRound(c.x2 - c.x1), height: 2 }));
+  }
+  for (const ev of line.events) for (const n of ev.notes) {
+    if (n.sustainX2 === null) continue;
+    svg.append(el('rect', { class: `tabSustain${n.low ? ' low' : ''}`, x: tabRound(n.sustainX1), y: tabRound(n.y - 1), width: tabRound(n.sustainX2 - n.sustainX1), height: 2 }));
+  }
+
+  for (const ev of line.events) {
+    // §2.10 each event is a <g data-t>; UX-04 hooks click-to-seek / drag-to-loop on it (no handlers here)
+    const group = el('g', { class: 'tabEvent', 'data-t': ev.t, 'data-index': ev.index });
+    group.append(el('rect', {
+      class: 'tabHit', x: tabRound(ev.colLeft - 2), y: tabRound(g.staffTop - 10),
+      width: tabRound(ev.colRight - ev.colLeft + 4), height: tabRound(g.rhythmY2 - g.staffTop + 10),
+    }));
+    for (const n of ev.notes) renderTabNote(group, layout, n);
+    // §2.3.5 rhythm stem
+    group.append(el('line', { class: `tabStem${ev.stemLow ? ' low' : ''}`, x1: tabRound(ev.x), x2: tabRound(ev.x), y1: g.rhythmY1, y2: g.rhythmY2 }));
+    svg.append(group);
+    tabEventNodes[ev.index] = group;
+    tabEventList[ev.index] = ev;
+  }
   return svg;
 }
 
-function renderFlute(notes) {
-  const width = Math.max(1000, 120 + notes.length * 54);
-  const height = 270;
-  const svg = el('svg', { width, height, viewBox: `0 0 ${width} ${height}` });
-  const top = 80, gap = 18;
-  for (let i=0; i<5; i++) svg.append(el('line', { x1: 55, y1: top+i*gap, x2: width-30, y2: top+i*gap, stroke: '#555' }));
+/** Lays out and draws the TAB card for the current `result` at the card's current width. */
+function renderTab() {
+  const previousT = tabCursorIndex >= 0 ? tabEventList[tabCursorIndex]?.t : null;
+  const width = measureTabWidth();
+  tabLayout = TabLayout.layoutTab(result, width);
+  tabRenderedWidth = width;
+  tabEventNodes = [];
+  tabEventList = [];
+  tabNoteNodes = [];
+  tabActiveNodes = new Set();
+  hideTabTooltip();
 
-  const stepMap = {0:0, 2:1, 4:2, 5:3, 7:4, 9:5, 11:6};
-  function staffStep(midi) {
-    const octave = Math.floor(midi/12)-1;
-    const pc = midi % 12;
-    const nearest = Object.keys(stepMap).map(Number).sort((a,b)=>Math.abs(a-pc)-Math.abs(b-pc))[0];
-    const diatonic = octave*7 + stepMap[nearest];
-    return diatonic - (4*7 + 2);
+  document.querySelector('#tabTitle').textContent = tabLayout.title; // §1 "TAB" or "Melody"
+  if (tabLayout.kind === 'empty') {
+    renderTabMessage(tabLayout.message);
+    return;
   }
+  document.querySelector('#tabMessage').hidden = true;
+  renderTabLegend(tabLayout.legend);
 
-  notes.forEach((n, idx) => {
-    const x = 85 + idx*54;
-    const y = top + 4*gap - staffStep(n.midi)*(gap/2);
-    svg.append(el('ellipse', { cx: x, cy: y, rx: 7, ry: 5, fill: '#111', transform: `rotate(-18 ${x} ${y})` }));
-    svg.append(el('line', { x1: x+6, y1: y, x2: x+6, y2: y-34, stroke: '#111', 'stroke-width': 1.5 }));
-    const label = el('text', { x: x-13, y: 32, class: 'noteLabel' }); label.textContent = n.name; svg.append(label);
-    const tm = el('text', { x: x-12, y: 235, class: 'noteLabel' }); tm.textContent = n.start.toFixed(1)+'s'; svg.append(tm);
+  const container = document.querySelector('#tabLines');
+  container.textContent = '';
+  const frag = document.createDocumentFragment();
+  tabLayout.lines.forEach(line => frag.append(renderTabLine(tabLayout, line)));
+  container.append(frag);
+  container.hidden = false;
+  // §7.2 one tab stop with a roving cursor
+  container.setAttribute('tabindex', '0');
+  container.setAttribute('role', 'group');
+  container.setAttribute('aria-label', TabLayout.tabAriaLabel(tabLayout));
+  wireTabUi(container);
+
+  tabCursorIndex = -1;
+  if (previousT !== null && previousT !== undefined && tabEventList.length) {
+    let best = 0;
+    tabEventList.forEach((ev, i) => { if (Math.abs(ev.t - previousT) < Math.abs(tabEventList[best].t - previousT)) best = i; });
+    setTabCursor(best, { announce: false, tooltip: document.activeElement === container });
+  }
+  if (tabLastHighlightT !== null) tabHighlightAt(tabLastHighlightT);
+}
+
+function scheduleTabRelayout() {
+  clearTimeout(tabResizeTimer);
+  tabResizeTimer = setTimeout(() => { // §2.10 debounced 150 ms
+    if (!result || measureTabWidth() === tabRenderedWidth) return;
+    renderTab();
+  }, TAB_RESIZE_DEBOUNCE_MS);
+}
+
+/**
+ * §2.8 active notes: start <= t < max(end, start + 0.15) get the .active class
+ * (--accent, weight 700, 1 px box). t is capture time in seconds; null clears.
+ * Called by updatePlaybackUi today; UX-04's transport should call it every frame.
+ */
+function tabHighlightAt(seconds) {
+  tabLastHighlightT = Number.isFinite(seconds) ? seconds : null;
+  const next = new Set();
+  if (tabLastHighlightT !== null) {
+    for (const item of tabNoteNodes) {
+      if (item.start <= tabLastHighlightT && tabLastHighlightT < item.activeEnd) next.add(item.node);
+    }
+  }
+  for (const node of tabActiveNodes) if (!next.has(node)) node.classList.remove('active');
+  for (const node of next) if (!tabActiveNodes.has(node)) node.classList.add('active');
+  tabActiveNodes = next;
+}
+
+function showTabTooltip(index) {
+  const tooltip = document.querySelector('#tabTooltip');
+  const ev = tabEventList[index];
+  const node = tabEventNodes[index];
+  const card = document.querySelector('#tabCard');
+  if (!tooltip || !ev || !node || !card) return;
+  tooltip.textContent = '';
+  for (const line of ev.tooltip) { // §2.8 one line per note
+    const row = document.createElement('div');
+    row.textContent = line;
+    tooltip.append(row);
+  }
+  tooltip.hidden = false;
+  const anchor = (node.querySelector('.tabHit') || node).getBoundingClientRect();
+  const cardRect = card.getBoundingClientRect();
+  const width = tooltip.offsetWidth;
+  const centre = anchor.left - cardRect.left + anchor.width / 2;
+  const left = Math.max(0, Math.min(card.clientWidth - width, centre - width / 2));
+  tooltip.style.left = `${Math.round(left)}px`;
+  tooltip.style.top = `${Math.round(anchor.bottom - cardRect.top + 4)}px`;
+}
+
+function hideTabTooltip() {
+  const tooltip = document.querySelector('#tabTooltip');
+  if (tooltip) tooltip.hidden = true;
+}
+
+function setTabCursor(index, { announce = true, tooltip = true } = {}) {
+  if (!tabEventList.length) return;
+  const i = Math.max(0, Math.min(tabEventList.length - 1, index));
+  document.querySelectorAll('#tabLines .tabCursor').forEach(node => node.remove());
+  tabCursorIndex = i;
+  const ev = tabEventList[i];
+  const group = tabEventNodes[i];
+  // §7.2 roving cursor, 2 px --focus box (shown only while the TAB has focus, see result.css)
+  group.append(el('rect', {
+    class: 'tabCursor', x: tabRound(ev.colLeft - 3), y: tabRound(tabLayout.geometry.staffTop - 11),
+    width: tabRound(ev.colRight - ev.colLeft + 6), height: tabRound(tabLayout.geometry.rhythmY2 - tabLayout.geometry.staffTop + 12),
+    rx: 3,
+  }));
+  group.closest('svg')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  if (tooltip) showTabTooltip(i);
+  if (announce) tabAnnounce(ev.speech); // §7.2 live read
+}
+
+function wireTabUi(container) {
+  if (tabUiWired) return;
+  tabUiWired = true;
+
+  // §2.8 hover tooltip (event delegation; the <g> nodes are rebuilt on every relayout)
+  container.addEventListener('mouseover', event => {
+    const group = event.target.closest?.('.tabEvent');
+    if (!group) return;
+    const index = Number(group.dataset.index);
+    if (index === tabHoverIndex) return;
+    tabHoverIndex = index;
+    showTabTooltip(index);
   });
-  return svg;
+  container.addEventListener('mouseleave', () => {
+    tabHoverIndex = -1;
+    if (document.activeElement === container && tabCursorIndex >= 0) showTabTooltip(tabCursorIndex);
+    else hideTabTooltip();
+  });
+
+  // §7.2 keyboard model (focus shows the tooltip too, §7.5)
+  container.addEventListener('focus', () => {
+    if (!tabEventList.length) return;
+    // keyboard focus shows the cursor tooltip; a mouse click that focuses the TAB does not
+    const keyboard = container.matches(':focus-visible');
+    setTabCursor(tabCursorIndex >= 0 ? tabCursorIndex : 0, { announce: false, tooltip: keyboard });
+  });
+  container.addEventListener('blur', () => hideTabTooltip());
+  container.addEventListener('keydown', event => {
+    if (!tabEventList.length) return;
+    let next = null;
+    switch (event.key) {
+      case 'ArrowLeft': next = tabCursorIndex - 1; break; // Shift+← / → loop extension: UX-04
+      case 'ArrowRight': next = tabCursorIndex + 1; break;
+      case 'Home': next = 0; break;
+      case 'End': next = tabEventList.length - 1; break;
+      case 'Escape': hideTabTooltip(); event.preventDefault(); return;
+      case 'Enter': {
+        // UX-04 hook: the transport listens for `tabseek` and seeks to detail.t (capture seconds)
+        const ev = tabEventList[tabCursorIndex];
+        if (ev) container.dispatchEvent(new CustomEvent('tabseek', { bubbles: true, detail: { t: ev.t, index: ev.index } }));
+        event.preventDefault();
+        return;
+      }
+      default: return;
+    }
+    event.preventDefault();
+    setTabCursor(Math.max(0, Math.min(tabEventList.length - 1, next)));
+  });
 }
 
 function renderTable(notes, instrument) {
@@ -280,6 +582,7 @@ function updatePlaybackUi() {
   const nearby = [...document.querySelectorAll('#notesBody tr[data-start]')]
     .find(row => Math.abs(Number(row.dataset.start) - sourceElapsed) < 0.08);
   nearby?.classList.add('playing');
+  tabHighlightAt(sourceElapsed); // §2.8 active notes on the TAB
 
   if (sourceElapsed >= playbackSourceDuration - 0.001) stopPlayback(true);
 }
@@ -367,6 +670,7 @@ async function stopPlayback(completed = false) {
   if (stop) stop.disabled = true;
 
   document.querySelectorAll('#notesBody tr.playing').forEach(row => row.classList.remove('playing'));
+  tabHighlightAt(null);
   if (completed) {
     document.querySelector('#playbackStatus').textContent = 'Playback finished. Compare what you heard with the original sample.';
     document.querySelector('#playbackProgress').style.width = '100%';
@@ -393,21 +697,19 @@ function originalSampleUrl() {
   try {
     result = await loadLatestResult();
   } catch (error) {
-    document.querySelector('#chart').textContent = `Could not load analysis result: ${error?.message || error}`;
+    renderTabMessage(TabLayout.MESSAGES.loadError.replace('{message}', error?.message || String(error))); // §1
     return;
   }
 
   if (!result) {
-    document.querySelector('#chart').textContent = 'No analysis result found.';
+    renderTabMessage(TabLayout.MESSAGES.noResult); // §1
     return;
   }
 
-  document.querySelector('#title').textContent = result.title || 'Music Note Chart';
-  document.querySelector('#meta').textContent = `${result.instrument} · ${result.mode} · ${result.notes.length} notes · ${result.duration_seconds.toFixed(1)} sec capture`;
-  document.querySelector('#chartTitle').textContent = result.instrument === 'guitar' ? 'Guitar TAB (MVP fingering)' : 'Flute melody staff (MVP)';
-  const chart = document.querySelector('#chart');
-  chart.append(result.instrument === 'guitar' ? renderGuitar(result.notes) : renderFlute(result.notes));
-  renderTable(result.notes, result.instrument);
+  renderResultHeader(TabLayout.buildHeader(result)); // §1 header + notice
+  renderTab(); // §2
+  window.addEventListener('resize', scheduleTabRelayout); // §2.10
+  renderTable(result.notes || [], result.instrument);
 
   document.querySelector('#playTen').addEventListener('click', () => startPlayback(90, 1));
   document.querySelector('#playTenSlow').addEventListener('click', () => startPlayback(90, 0.75));

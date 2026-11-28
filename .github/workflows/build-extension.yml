@@ -53,6 +53,10 @@ jobs:
         working-directory: extension
         run: node scripts/test-pipeline-purity.mjs
 
+      - name: Test popup progress
+        working-directory: extension
+        run: node scripts/test-popup-progress.mjs
+
       - name: Build extension
         working-directory: extension
         run: npm run build
@@ -79,6 +83,7 @@ jobs:
           cp extension/popup.html extension-package/
           cp extension/popup.js extension-package/
           cp extension/popup.css extension-package/
+          cp extension/popup-progress.js extension-package/
           cp extension/result.html extension-package/
           cp extension/result.js extension-package/
           cp extension/result.css extension-package/

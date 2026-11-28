@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "YouTube Music Notes",
   "version": "0.5.7",
-  "description": "Capture the first 90 seconds of a YouTube video, transcribe the guitar locally in Chrome, compare against the original audio, and render playable TAB.",
+  "description": "Capture 30, 60 or 90 s of a YouTube video from where you are, transcribe the guitar locally in Chrome and render playable TAB.",
   "permissions": [
     "activeTab",
     "tabCapture",

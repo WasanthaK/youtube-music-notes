@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -9,37 +9,53 @@
 <body>
   <main>
     <h1>YouTube Music Notes</h1>
-    <p class="sub">Transcribes the first 90 seconds of the YouTube video in this tab into guitar TAB.</p>
 
-    <label>Instrument
-      <select id="instrument">
-        <option value="guitar">Guitar</option>
-        <option value="flute">Flute</option>
-      </select>
-    </label>
+    <label class="field" for="instrument">Instrument</label>
+    <select id="instrument">
+      <option value="guitar">Guitar</option>
+      <option value="flute">Flute</option>
+    </select>
 
-    <label>Mode
-      <select id="mode">
-        <option value="arrange">Arrange melody for instrument</option>
-        <option value="transcribe">Transcribe recorded part</option>
-      </select>
-    </label>
+    <fieldset class="segmented" id="lengthGroup">
+      <legend class="field">Length</legend>
+      <div class="segments">
+        <input type="radio" name="captureSeconds" id="len30" value="30" />
+        <label for="len30">30 s</label>
+        <input type="radio" name="captureSeconds" id="len60" value="60" />
+        <label for="len60">60 s</label>
+        <input type="radio" name="captureSeconds" id="len90" value="90" checked />
+        <label for="len90">90 s</label>
+      </div>
+    </fieldset>
 
-    <label>
-      <input type="checkbox" id="shareDiagnostics" />
-      Share diagnostics
-    </label>
-    <p class="hint">Sends the video ID, detected notes and metrics to help improve accuracy. Off by default.</p>
+    <p id="preview" class="preview">From 0:00 to 1:30 in this video</p>
 
-    <div class="status"><strong>Section:</strong> 0:00 → 1:30 (the video restarts from the beginning)</div>
-
-    <div class="buttons">
-      <button id="start">Transcribe first 90 seconds</button>
-      <button id="stop" class="secondary">Stop</button>
+    <div class="buttons" id="primaryButtons">
+      <button id="capture" class="primary" type="button">Capture 90 s from 0:00</button>
+      <button id="stop" class="secondary" type="button" hidden>Stop and analyse</button>
+      <button id="openResult" class="primary" type="button" hidden>Open result</button>
+      <button id="newCapture" class="secondary" type="button" hidden>New capture</button>
     </div>
 
-    <div id="status">Ready.</div>
+    <details id="advanced">
+      <summary>Advanced <span id="sharingSummary">· sharing off</span></summary>
+      <div class="advancedBody">
+        <label class="check" for="shareDiagnostics">
+          <input type="checkbox" id="shareDiagnostics" />
+          Share diagnostics
+        </label>
+        <p class="hint">Sends the video ID, detected notes and metrics to help improve accuracy. Off by default.</p>
+        <button id="benchmark" class="secondary" type="button">Run benchmark (0:00–1:30)</button>
+        <p class="hint">Rewinds the video to 0:00 and records 90 s.</p>
+      </div>
+    </details>
+
+    <div class="statusArea">
+      <div id="status" role="status" aria-live="polite">Ready.</div>
+      <div id="error" role="alert" hidden></div>
+      <progress id="progress" max="1" value="0" hidden></progress>
+    </div>
   </main>
-  <script src="popup.js"></script>
+  <script type="module" src="popup.js"></script>
 </body>
 </html>
